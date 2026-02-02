@@ -23,7 +23,10 @@
           <text class="summary-label">总支出：</text>
           <text class="summary-value amount">¥{{total}}</text>
         </view>
-        <button wx:if="{{isCreator}}" class="btn-delete-activity" size="mini" bindtap="deleteActivity">删除</button>
+        <view class="summary-actions">
+          <button class="btn-download-activity" size="mini" bindtap="downloadActivityPdf">下载</button>
+          <button wx:if="{{isCreator}}" class="btn-delete-activity" size="mini" bindtap="deleteActivity">删除</button>
+        </view>
       </view>
       <view class="summary-info-item">
         <text class="summary-label">{{dateRange}} | 账单数量：{{bills.length}} 条</text>
@@ -229,6 +232,16 @@
         </scroll-view>
       </view>
     </view>
+
+    <!-- PDF 保存指引弹层 -->
+    <view wx:if="{{showPdfGuideModal}}" class="pdf-modal-mask" catchtouchmove="noop">
+      <view class="pdf-modal">
+        <view class="pdf-modal-title">PDF已生成</view>
+        <view class="pdf-modal-content">{{pdfGuideText}}</view>
+        <button class="pdf-modal-btn" bindtap="closePdfGuideModal">知道了</button>
+      </view>
+    </view>
+    
+    <!-- 隐藏导出用Canvas -->
+    <canvas canvas-id="pdfCanvas" class="pdf-canvas" style="width: {{pdfCanvasWidth}}px; height: {{pdfCanvasHeight}}px;"></canvas>
 </view>
-
-

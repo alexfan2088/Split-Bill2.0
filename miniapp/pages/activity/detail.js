@@ -30,6 +30,11 @@ Page({
     selectedMemberIncome: '0.00', // 收入总额
     selectedMemberExpense: '0.00', // 支出总额
     selectedMemberBalance: '0.00', // 余额
+    pdfCanvasWidth: 750,
+    pdfCanvasHeight: 1200,
+    pdfReminderShown: false,
+    showPdfGuideModal: false,
+    pdfGuideText: ''
   },
   
   onShareAppMessage() {
@@ -533,6 +538,9 @@ Page({
         totalConsume: this.formatAmount(totalConsume),
         remaining: this.formatAmount(remaining),
       });
+
+      // 检查是否需要提示下载PDF
+      this.checkPdfDownloadReminder(activity);
       
       // 保存到全局数据
       app.globalData.currentActivity = activity;
@@ -1328,6 +1336,639 @@ Page({
     await Promise.all(drawPromises);
   },
 
+  // 检查PDF下载提醒
+  checkPdfDownloadReminder(activity) {
+    if (this.data.pdfReminderShown) return;
+    const userName = db.getCurrentUser();
+    if (!userName || !activity) return;
+
+    const lastDownloadAt = this.getLastPdfDownloadAt(activity);
+    if (!lastDownloadAt) return;
+
+    const now = Date.now();
+    const diffDays = Math.floor((now - lastDownloadAt) / (24 * 60 * 60 * 1000));
+    if (diffDays < 7) return;
+
+    this.setData({ pdfReminderShown: true });
+    wx.showModal({
+      title: '下载提醒',
+      content: `已${diffDays}天未下载活动信息，是否现在下载？`,
+      success: (res) => {
+        if (res.confirm) {
+          this.downloadActivityPdf();
+        }
+      }
+    });
+  },
+
+  getPdfDownloadKey() {
+    const userName = db.getCurrentUser() || 'guest';
+    return `aa_activity_pdf_last_download_${userName}_${this.data.activityId}`;
+  },
+
+  getLastPdfDownloadAt(activity) {
+    const key = this.getPdfDownloadKey();
+    const stored = wx.getStorageSync(key);
+    if (stored) return stored;
+
+    const activityDate = activity.updatedAt || activity.createdAt;
+    if (!activityDate) return 0;
+    const date = activityDate.getTime ? activityDate : new Date(activityDate);
+    const time = date.getTime();
+    return Number.isNaN(time) ? 0 : time;
+  },
+
+  setLastPdfDownloadAt(timestamp) {
+    const key = this.getPdfDownloadKey();
+    wx.setStorageSync(key, timestamp);
+  },
+
+  formatYymmdd(dateObj) {
+    const date = dateObj || new Date();
+    const year = String(date.getFullYear()).slice(-2);
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}${month}${day}`;
+  },
+
+  sanitizeFileName(name) {
+    const safe = (name || '').replace(/[\\/:*?"<>|]/g, '_').trim();
+    if (!safe) return '活动信息.pdf';
+    return safe.toLowerCase().endsWith('.pdf') ? safe : `${safe}.pdf`;
+  },
+
+  async downloadActivityPdf() {
+    if (!this.data.activity) {
+      wx.showToast({ title: '活动数据未加载', icon: 'none' });
+      return;
+    }
+
+    const defaultName = `${this.data.activity.name || '活动'}-${this.formatYymmdd(new Date())}.pdf`;
+    const fileName = this.sanitizeFileName(defaultName);
+
+    let progressDone = 0;
+    let progressTotal = 1;
+    const updateProgress = () => {
+      const pct = Math.min(99, Math.max(1, Math.floor((progressDone / progressTotal) * 100)));
+      wx.showLoading({ title: `文件正在生成...${pct}%` });
+    };
+    wx.showLoading({ title: '文件正在生成...1%' });
+    try {
+      const pageData = this.buildPdfPages();
+      progressTotal = pageData.pages.length * 2 + 3;
+      updateProgress();
+
+      const imageInfos = await this.renderPdfCanvasToImages(pageData, () => {
+        progressDone += 1;
+        updateProgress();
+      });
+      console.log('[PDF] pages:', imageInfos.length);
+      const uploads = [];
+      for (const info of imageInfos) {
+        const uploadRes = await this.uploadPdfImageToCloud(info.tempFilePath);
+        console.log('[PDF] upload image ok:', uploadRes && uploadRes.fileID);
+        uploads.push({ fileID: uploadRes.fileID, fileType: info.fileType });
+        progressDone += 1;
+        updateProgress();
+      }
+
+      const pdfRes = await wx.cloud.callFunction({
+        name: 'exportActivityPdf',
+        data: { files: uploads }
+      });
+      progressDone += 1;
+      updateProgress();
+
+      const result = pdfRes && pdfRes.result ? pdfRes.result : null;
+      if (!result || result.success === false) {
+        const errMsg = (result && result.error) ? result.error : 'PDF生成失败';
+        console.error('导出PDF失败:', errMsg, result);
+        throw new Error(errMsg);
+      }
+
+      const fileID = result.fileID;
+      if (!fileID) {
+        throw new Error('PDF生成失败');
+      }
+
+      const tempUrlRes = await wx.cloud.getTempFileURL({ fileList: [fileID] });
+      const tempUrl = tempUrlRes && tempUrlRes.fileList && tempUrlRes.fileList[0] && tempUrlRes.fileList[0].tempFileURL;
+      if (!tempUrl) {
+        throw new Error('获取下载链接失败');
+      }
+
+      const downloadRes = await new Promise((resolve, reject) => {
+        wx.downloadFile({
+          url: tempUrl,
+          success: resolve,
+          fail: reject
+        });
+      });
+      console.log('[PDF] download status:', downloadRes && downloadRes.statusCode);
+      progressDone += 1;
+      updateProgress();
+
+      const savedPath = await this.savePdfFile(downloadRes.tempFilePath, fileName);
+      console.log('[PDF] savedPath:', savedPath);
+      progressDone += 1;
+      updateProgress();
+
+      this.setLastPdfDownloadAt(Date.now());
+      this.setData({ pdfReminderShown: true });
+
+      wx.hideLoading();
+      const guideText = `文件：${fileName} \n如需保存在本地：\n1) 在预览页右上角点击“...”\n2) 选择“转发给朋友”或“保存到手机”`;
+      this._pendingPdfPath = savedPath;
+      this.setData({
+        showPdfGuideModal: true,
+        pdfGuideText: guideText
+      });
+
+      // 清理云端临时文件
+      const cleanupIds = [fileID].concat(uploads.map(u => u.fileID));
+      wx.cloud.deleteFile({ fileList: cleanupIds }).catch(() => {});
+    } catch (e) {
+      console.error('导出PDF失败:', e);
+      wx.hideLoading();
+      wx.showToast({ title: '生成失败', icon: 'none' });
+    }
+  },
+
+  async savePdfFile(tempFilePath, fileName) {
+    const fs = wx.getFileSystemManager();
+    const targetPath = `${wx.env.USER_DATA_PATH}/${fileName}`;
+    try {
+      const res = await new Promise((resolve, reject) => {
+        fs.saveFile({
+          tempFilePath,
+          filePath: targetPath,
+          success: resolve,
+          fail: reject
+        });
+      });
+      return res.savedFilePath || targetPath;
+    } catch (e) {
+      const res = await new Promise((resolve, reject) => {
+        wx.saveFile({
+          tempFilePath,
+          success: resolve,
+          fail: reject
+        });
+      });
+      return res.savedFilePath;
+    }
+  },
+
+  async renderPdfCanvasToImages(pageData, onPageRendered) {
+    const { pages, pageWidth, pageHeight, padding, lineHeight } = pageData || this.buildPdfPages();
+    const results = [];
+
+    for (let i = 0; i < pages.length; i++) {
+      this.setData({
+        pdfCanvasWidth: pageWidth,
+        pdfCanvasHeight: pageHeight
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 30));
+
+      const ctx = wx.createCanvasContext('pdfCanvas', this);
+      ctx.setFillStyle('#ffffff');
+      ctx.fillRect(0, 0, pageWidth, pageHeight);
+      ctx.setTextBaseline('top');
+
+      this.renderPdfPage(ctx, pages[i], padding, lineHeight);
+      await new Promise(resolve => ctx.draw(false, resolve));
+
+      const tempRes = await new Promise((resolve, reject) => {
+        wx.canvasToTempFilePath({
+          canvasId: 'pdfCanvas',
+          fileType: 'jpg',
+          quality: 0.8,
+          success: resolve,
+          fail: reject
+        }, this);
+      });
+
+      results.push({
+        tempFilePath: tempRes.tempFilePath,
+        fileType: 'jpg'
+      });
+      if (onPageRendered) {
+        onPageRendered(i);
+      }
+    }
+
+    return results;
+  },
+
+  buildPdfPages() {
+    const activity = this.data.activity || {};
+    const bills = this.data.rawBills || [];
+    const members = this.data.members || [];
+    const rawRecharges = this.data.rawRecharges || [];
+    const isPrepaid = this.data.isPrepaid || false;
+    const keeper = this.data.keeper || '';
+    const defaultFileName = `${activity.name || '活动'}-${this.formatYymmdd(new Date())}.pdf`;
+
+    const pageWidth = 820;
+    const pageHeight = 1200;
+    const padding = 32;
+    const lineHeight = 32;
+    const maxLines = Math.floor((pageHeight - padding * 2) / lineHeight);
+
+    const pages = [[]];
+    let lineCount = 0;
+
+    const pushLine = (line) => {
+      if (lineCount >= maxLines) {
+        pages.push([]);
+        lineCount = 0;
+      }
+      pages[pages.length - 1].push(line);
+      lineCount += 1;
+    };
+
+    const pushBlank = () => {
+      pushLine({ type: 'text', text: '', fontSize: 20, color: '#111111' });
+    };
+
+    const addTitle = (text) => {
+      pushLine({ type: 'text', text, fontSize: 26, color: '#1d4ed8', bold: true, role: 'title' });
+    };
+
+    const addMemberTitle = (text) => {
+      pushLine({ type: 'text', text, fontSize: 24, color: '#15803d', bold: true, role: 'title' });
+    };
+
+    const addPurpleTitle = (text) => {
+      pushLine({ type: 'text', text, fontSize: 22, color: '#7c3aed', bold: true, role: 'title' });
+    };
+
+    const addGreenNote = (text) => {
+      pushLine({ type: 'text', text, fontSize: 20, color: '#15803d', bold: false, role: 'title' });
+    };
+
+    const addText = (text) => {
+      pushLine({ type: 'text', text, fontSize: 20, color: '#111111', role: 'body' });
+    };
+
+    const wrapTextToLines = (text, width, fontSize) => {
+      const raw = String(text || '');
+      if (!raw) return [''];
+      const unitWidth = fontSize * 0.95;
+      const maxUnits = Math.max(1, Math.floor(width / unitWidth));
+      const lines = [];
+      let current = '';
+      let units = 0;
+      for (let i = 0; i < raw.length; i++) {
+        const ch = raw[i];
+        const isAscii = ch.charCodeAt(0) <= 0x7f;
+        const chUnits = isAscii ? 0.5 : 1;
+        if (units + chUnits > maxUnits && current) {
+          lines.push(current);
+          current = ch;
+          units = chUnits;
+        } else {
+          current += ch;
+          units += chUnits;
+        }
+      }
+      if (current) lines.push(current);
+      return lines;
+    };
+
+    const addRow = (columns, fontSize = 18) => {
+      const wrappedCols = columns.map(col => {
+        if (col.wrap) {
+          return wrapTextToLines(col.text, col.width - 6, fontSize);
+        }
+        return [String(col.text || '')];
+      });
+      const maxLines = wrappedCols.reduce((max, lines) => Math.max(max, lines.length), 1);
+      for (let i = 0; i < maxLines; i++) {
+        const lineCols = columns.map((col, idx) => ({
+          ...col,
+          text: wrappedCols[idx][i] || '',
+          noTruncate: true
+        }));
+        pushLine({ type: 'row', columns: lineCols, fontSize, color: '#111111' });
+      }
+    };
+
+    // 活动信息
+    addTitle('活动信息');
+    const activityName = activity.name || '未命名活动';
+    const creator = activity.creator || '';
+    const memberNames = (activity.members || []).map(m => m.name || m).join('、');
+    const prepaidInfo = activity.isPrepaid ? `预存活动（保管人：${activity.keeper || '未设置'}）` : '非预存活动';
+    const exportTime = this.formatExportTime(new Date());
+
+    addText(`活动名称：${activityName}`);
+    addText(`活动类型：${activity.type || '未设置'}`);
+    addText(`创建者：${creator}`);
+    addText(`成员：${memberNames || '无'}`);
+    addText(`活动属性：${prepaidInfo}`);
+    addText(`账单范围：${this.data.dateRange || '至今'}，账单数量：${bills.length} 条`);
+    addText(`导出时间：${exportTime}`);
+    addText(`PDF文件：${defaultFileName}`);
+
+    pushBlank();
+
+    // 账单信息
+    addTitle('账单信息');
+    const billColDate = 130;
+    const billColAmount = 110;
+    const billColPayer = 120;
+    const billColParticipants = 260;
+    const billColTitle = pageWidth - padding * 2 - billColDate - billColAmount - billColPayer - billColParticipants;
+    addRow([
+      { text: '日期', x: 0, width: billColDate },
+      { text: '名称', x: billColDate, width: billColTitle },
+      { text: '付款人', x: billColDate + billColTitle, width: billColPayer },
+      { text: '参与人', x: billColDate + billColTitle + billColPayer, width: billColParticipants },
+      { text: '金额', x: billColDate + billColTitle + billColPayer + billColParticipants, width: billColAmount }
+    ], 18);
+
+    if (bills.length === 0) {
+      addText('暂无账单记录');
+    } else {
+      bills.forEach((bill) => {
+        const date = this.formatBillDate(bill);
+        const title = bill.title || '未命名';
+        const payer = (bill.billshow || bill.payer) || '';
+        const participants = bill.participants
+          ? Object.keys(bill.participants).filter(name => bill.participants[name] > 0).join('、')
+          : '';
+        const amount = `¥${this.formatAmount(bill.amount || 0)}`;
+        addRow([
+          { text: date, x: 0, width: billColDate },
+          { text: title, x: billColDate, width: billColTitle, wrap: true },
+          { text: payer, x: billColDate + billColTitle, width: billColPayer, wrap: true },
+          { text: participants, x: billColDate + billColTitle + billColPayer, width: billColParticipants, wrap: true },
+          { text: amount, x: billColDate + billColTitle + billColPayer + billColParticipants, width: billColAmount }
+        ], 18);
+      });
+    }
+
+    pushBlank();
+
+    // 结算信息
+    addTitle('结算信息');
+    addText(`总支出：¥${this.data.total}，人均：¥${this.data.avg}`);
+    const memberColName = 140;
+    const memberColPaid = 160;
+    const memberColShould = 160;
+    const memberColBalance = pageWidth - padding * 2 - memberColName - memberColPaid - memberColShould;
+    addRow([
+      { text: '成员', x: 0, width: memberColName },
+      { text: '实付', x: memberColName, width: memberColPaid },
+      { text: '应付', x: memberColName + memberColPaid, width: memberColShould },
+      { text: '余额', x: memberColName + memberColPaid + memberColShould, width: memberColBalance }
+    ], 18);
+
+    members.forEach((m) => {
+      const name = m.name || '';
+      addRow([
+        { text: name, x: 0, width: memberColName },
+        { text: `¥${m.bal ? m.bal.paid : '0.0'}`, x: memberColName, width: memberColPaid },
+        { text: `¥${m.bal ? m.bal.shouldPay : '0.0'}`, x: memberColName + memberColPaid, width: memberColShould },
+        { text: `¥${m.bal ? m.bal.balance : '0.0'}`, x: memberColName + memberColPaid + memberColShould, width: memberColBalance }
+      ], 18);
+    });
+
+    pushBlank();
+
+    members.forEach((m) => {
+      const memberName = m.name || '';
+      if (!memberName) return;
+      const details = this.buildMemberBillDetails(memberName, bills, rawRecharges, isPrepaid, keeper);
+
+      addMemberTitle(`${memberName} 结算信息`);
+
+      const incomeTotal = details.incomeBills.reduce((sum, b) => sum + Number(b.amount || 0), 0);
+      const expenseTotal = details.expenseBills.reduce((sum, b) => sum + Number(b.amount || 0), 0);
+      const balance = this.formatAmount(Number(m.bal ? m.bal.balance : 0));
+      pushLine({ type: 'text', text: `收入：¥${this.formatAmount(incomeTotal)}  支出：¥${this.formatAmount(expenseTotal)}  余额：¥${balance}`, fontSize: 20, color: '#111111', bold: false });
+
+      addPurpleTitle(`${memberName} 收入信息`);
+      const incomeColTitle = 260;
+      const incomeColCounter = 200;
+      const incomeColAmount = 110;
+      const incomeColDate = pageWidth - padding * 2 - incomeColTitle - incomeColCounter - incomeColAmount;
+      addRow([
+        { text: '名称', x: 0, width: incomeColTitle },
+        { text: '付款人', x: incomeColTitle, width: incomeColCounter },
+        { text: '金额', x: incomeColTitle + incomeColCounter, width: incomeColAmount },
+        { text: '日期', x: incomeColTitle + incomeColCounter + incomeColAmount, width: incomeColDate }
+      ], 18);
+      if (details.incomeBills.length === 0) {
+        addText('暂无记录');
+      } else {
+        details.incomeBills.forEach((row) => {
+          addRow([
+            { text: row.title || '未命名', x: 0, width: incomeColTitle },
+            { text: row.payer || '', x: incomeColTitle, width: incomeColCounter, wrap: true },
+            { text: `¥${row.amount || '0.0'}`, x: incomeColTitle + incomeColCounter, width: incomeColAmount },
+            { text: row.date || '', x: incomeColTitle + incomeColCounter + incomeColAmount, width: incomeColDate }
+          ], 18);
+        });
+      }
+
+      addPurpleTitle(`${memberName} 支出信息`);
+      const expenseColTitle = 260;
+      const expenseColCounter = 200;
+      const expenseColAmount = 110;
+      const expenseColDate = pageWidth - padding * 2 - expenseColTitle - expenseColCounter - expenseColAmount;
+      addRow([
+        { text: '名称', x: 0, width: expenseColTitle },
+        { text: '收款人', x: expenseColTitle, width: expenseColCounter },
+        { text: '金额', x: expenseColTitle + expenseColCounter, width: expenseColAmount },
+        { text: '日期', x: expenseColTitle + expenseColCounter + expenseColAmount, width: expenseColDate }
+      ], 18);
+      if (details.expenseBills.length === 0) {
+        addText('暂无记录');
+      } else {
+        details.expenseBills.forEach((row) => {
+          addRow([
+            { text: row.title || '未命名', x: 0, width: expenseColTitle },
+            { text: row.payee || '', x: expenseColTitle, width: expenseColCounter, wrap: true },
+            { text: `¥${row.amount || '0.0'}`, x: expenseColTitle + expenseColCounter, width: expenseColAmount },
+            { text: row.date || '', x: expenseColTitle + expenseColCounter + expenseColAmount, width: expenseColDate }
+          ], 18);
+        });
+      }
+
+      pushBlank();
+    });
+
+    const noIncomeExpenseMembers = members
+      .map(m => m.name || '')
+      .filter(Boolean)
+      .filter(name => {
+        const details = this.buildMemberBillDetails(name, bills, rawRecharges, isPrepaid, keeper);
+        return details.incomeBills.length === 0 && details.expenseBills.length === 0;
+      });
+    if (noIncomeExpenseMembers.length > 0) {
+      addGreenNote(`${noIncomeExpenseMembers.join('、')} 没有产生收入和支出`);
+    }
+
+    return { pages, pageWidth, pageHeight, padding, lineHeight };
+  },
+
+  renderPdfPage(ctx, lines, padding, lineHeight) {
+    lines.forEach((line, index) => {
+      const y = padding + index * lineHeight;
+      const fontSize = line.fontSize || 18;
+      const color = line.color || '#111111';
+      ctx.setFontSize(fontSize);
+      ctx.setFillStyle('#111111');
+      if (line.type === 'row') {
+        line.columns.forEach((col) => {
+          ctx.setFontSize(fontSize);
+          ctx.setFillStyle(col.color || '#111111');
+          const rawText = String(col.text || '');
+          const text = col.noTruncate ? rawText : this.truncateText(ctx, rawText, col.width - 6);
+          ctx.fillText(text, padding + col.x, y);
+        });
+      } else {
+        const isTitle = line.role === 'title';
+        ctx.setFontSize(line.bold ? fontSize + 1 : fontSize);
+        ctx.setFillStyle(isTitle ? color : '#111111');
+        const text = String(line.text || '');
+        ctx.fillText(text, padding, y);
+      }
+    });
+  },
+
+  formatNameAbbrev(listOrString) {
+    if (Array.isArray(listOrString)) {
+      return listOrString
+        .map(name => String(name || '').trim())
+        .filter(Boolean)
+        .map(name => name.charAt(name.length - 1))
+        .join('，');
+    }
+    const raw = String(listOrString || '').trim();
+    if (!raw) return '';
+    const parts = raw.split(/[、，,]/).map(name => name.trim()).filter(Boolean);
+    if (parts.length === 0) return '';
+    return parts.map(name => name.charAt(name.length - 1)).join('，');
+  },
+
+  formatNamesWithLimit(listOrString, limit) {
+    const names = Array.isArray(listOrString)
+      ? listOrString.map(name => String(name || '').trim()).filter(Boolean)
+      : String(listOrString || '').split(/[、，,]/).map(name => name.trim()).filter(Boolean);
+    if (names.length === 0) return '';
+    const totalLen = names.reduce((sum, name) => sum + name.length, 0);
+    if (totalLen <= limit) {
+      return names.join('，');
+    }
+    return names.map(name => name.charAt(name.length - 1)).join('，');
+  },
+
+  truncateText(ctx, text, maxWidth) {
+    let result = String(text || '');
+    if (ctx.measureText(result).width <= maxWidth) return result;
+    while (result.length > 0 && ctx.measureText(`${result}…`).width > maxWidth) {
+      result = result.slice(0, -1);
+    }
+    return `${result}…`;
+  },
+
+  async uploadPdfImageToCloud(tempFilePath) {
+    const cloudPath = `pdf_images/activity_${this.data.activityId}_${Date.now()}.jpg`;
+    const res = await wx.cloud.uploadFile({
+      cloudPath,
+      filePath: tempFilePath
+    });
+    return res;
+  },
+
+
+  buildMemberBillDetails(memberName, rawBills, rawRecharges, isPrepaid, keeper) {
+    let incomeBills = [];
+    let expenseBills = [];
+
+    if (isPrepaid && memberName === keeper) {
+      incomeBills = rawRecharges
+        .filter(r => r.keeper === keeper)
+        .map(r => ({
+          title: '充值',
+          payer: r.payer || '未知',
+          amount: this.formatAmount(r.amount || 0),
+          date: this.formatRechargeDate(r),
+          isRecharge: true
+        }));
+    } else {
+      incomeBills = rawBills
+        .filter(b => b && b.splitDetail && b.participants && b.participants[memberName] !== undefined && b.participants[memberName] > 0 && b.splitDetail[memberName] !== undefined)
+        .map(b => {
+          const displayPayer = (b.billshow || b.payer) || '未知';
+          return {
+            title: b.title || '未命名',
+            payer: displayPayer,
+            amount: this.formatAmount(b.splitDetail[memberName] || 0),
+            date: this.formatBillDate(b),
+            isRecharge: false
+          };
+        });
+    }
+
+    if (isPrepaid && memberName !== keeper) {
+      const rechargeBills = rawRecharges
+        .filter(r => r.payer === memberName)
+        .map(r => ({
+          title: '充值',
+          payee: r.keeper || keeper || '未知',
+          amount: this.formatAmount(r.amount || 0),
+          date: this.formatRechargeDate(r),
+          isRecharge: true
+        }));
+      expenseBills = expenseBills.concat(rechargeBills);
+    }
+
+    const billExpenses = rawBills
+      .filter(b => {
+        const displayPayer = (b.billshow || b.payer) || '';
+        if (!displayPayer) return false;
+        if (b.relatedRechargeId && b.billshow === memberName) return false;
+        return displayPayer === memberName;
+      })
+      .map(b => {
+        const payeeList = [];
+        if (b.participants) {
+          Object.keys(b.participants).forEach(name => {
+            if (b.participants[name] > 0) {
+              payeeList.push(name);
+            }
+          });
+        }
+        return {
+          title: b.title || '未命名',
+          payee: payeeList.length > 0 ? payeeList.join('、') : '未知',
+          amount: this.formatAmount(b.amount || 0),
+          date: this.formatBillDate(b),
+          isRecharge: false
+        };
+      });
+
+    expenseBills = expenseBills.concat(billExpenses);
+
+    return { incomeBills, expenseBills };
+  },
+
+
+  formatExportTime(dateObj) {
+    const date = dateObj || new Date();
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hour = String(date.getHours()).padStart(2, '0');
+    const minute = String(date.getMinutes()).padStart(2, '0');
+    return `${year}-${month}-${day} ${hour}:${minute}`;
+  },
+
   editActivity() {
     // 只有创建者才能编辑活动
     if (!this.data.isCreator) {
@@ -1499,6 +2140,17 @@ Page({
       }
     });
   },
+
+  closePdfGuideModal() {
+    const path = this._pendingPdfPath;
+    this._pendingPdfPath = '';
+    this.setData({ showPdfGuideModal: false });
+    if (path) {
+      wx.openDocument({
+        filePath: path,
+        fileType: 'pdf',
+        showMenu: true
+      });
+    }
+  }
 });
-
-

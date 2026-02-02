@@ -30,12 +30,11 @@
     }
   },
   "compileType": "miniprogram",
-  "libVersion": "2.19.4",
+  "libVersion": "3.12.1",
   "appid": "wx3872166fa2ed914d",
   "projectname": "Split-Bill-Miniapp",
+  "cloudfunctionRoot": "cloudfunctions/",
   "condition": {},
   "simulatorPluginLibVersion": {},
   "editorSetting": {}
 }
-
-
