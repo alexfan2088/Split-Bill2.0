@@ -1259,7 +1259,7 @@ Page({
       try {
         const canvas = canvasNode.node;
         const ctx = canvas.getContext('2d');
-        const dpr = wx.getSystemInfoSync().pixelRatio;
+        const dpr = wx.getWindowInfo().pixelRatio;
         const width = canvasNode.width || 54.8;
         const height = canvasNode.height || 54.8;
 
@@ -1391,6 +1391,18 @@ Page({
     return `${year}${month}${day}`;
   },
 
+  formatHhmmss(dateObj) {
+    const date = dateObj || new Date();
+    const hour = String(date.getHours()).padStart(2, '0');
+    const minute = String(date.getMinutes()).padStart(2, '0');
+    const second = String(date.getSeconds()).padStart(2, '0');
+    return `${hour}${minute}${second}`;
+  },
+
+  normalizeAsciiDigits(text) {
+    return String(text || '').replace(/[０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xfee0));
+  },
+
   sanitizeFileName(name) {
     const safe = (name || '').replace(/[\\/:*?"<>|]/g, '_').trim();
     if (!safe) return '活动信息.pdf';
@@ -1403,92 +1415,188 @@ Page({
       return;
     }
 
-    const defaultName = `${this.data.activity.name || '活动'}-${this.formatYymmdd(new Date())}.pdf`;
-    const fileName = this.sanitizeFileName(defaultName);
+    const now = new Date();
+    const defaultName = `${this.data.activity.name || '活动'}-${this.formatYymmdd(now)}${this.formatHhmmss(now)}.pdf`;
+    const fileName = this.sanitizeFileName(this.normalizeAsciiDigits(defaultName));
+    const baseName = fileName.replace(/\.pdf$/i, '');
 
+    let progress = 1;
+    let target = 1;
     let progressDone = 0;
     let progressTotal = 1;
-    const updateProgress = () => {
-      const pct = Math.min(99, Math.max(1, Math.floor((progressDone / progressTotal) * 100)));
-      wx.showLoading({ title: `文件正在生成...${pct}%` });
+    let driftTimer = null;
+    let progressTimer = null;
+    const startProgress = () => {
+      if (progressTimer) return;
+      progressTimer = setInterval(() => {
+        if (progress < target) {
+          progress += 1;
+          wx.showLoading({ title: `文件正在生成...${progress}%` });
+        }
+      }, 80);
+    };
+    const setTarget = (pct) => {
+      const next = Math.min(99, Math.max(progress, Math.floor(pct)));
+      target = next;
+    };
+    const startDrift = (endPct, step = 1, interval = 180) => {
+      if (driftTimer) {
+        clearInterval(driftTimer);
+        driftTimer = null;
+      }
+      const cap = Math.min(99, Math.max(progress, Math.floor(endPct)));
+      driftTimer = setInterval(() => {
+        if (target < cap) {
+          target = Math.min(cap, target + step);
+        } else {
+          clearInterval(driftTimer);
+          driftTimer = null;
+        }
+      }, interval);
+    };
+    const stopProgress = () => {
+      if (progressTimer) {
+        clearInterval(progressTimer);
+        progressTimer = null;
+      }
+      if (driftTimer) {
+        clearInterval(driftTimer);
+        driftTimer = null;
+      }
+    };
+    const updateTargetBySteps = (done, total) => {
+      if (!total) return;
+      const pct = Math.floor((done / total) * 100);
+      setTarget(pct);
     };
     wx.showLoading({ title: '文件正在生成...1%' });
+    startProgress();
     try {
-      const pageData = this.buildPdfPages();
-      progressTotal = pageData.pages.length * 2 + 3;
-      updateProgress();
-
-      const imageInfos = await this.renderPdfCanvasToImages(pageData, () => {
-        progressDone += 1;
-        updateProgress();
-      });
-      console.log('[PDF] pages:', imageInfos.length);
-      const uploads = [];
-      for (const info of imageInfos) {
-        const uploadRes = await this.uploadPdfImageToCloud(info.tempFilePath);
-        console.log('[PDF] upload image ok:', uploadRes && uploadRes.fileID);
-        uploads.push({ fileID: uploadRes.fileID, fileType: info.fileType });
-        progressDone += 1;
-        updateProgress();
-      }
-
-      const pdfRes = await wx.cloud.callFunction({
-        name: 'exportActivityPdf',
-        data: { files: uploads }
-      });
-      progressDone += 1;
-      updateProgress();
-
-      const result = pdfRes && pdfRes.result ? pdfRes.result : null;
-      if (!result || result.success === false) {
-        const errMsg = (result && result.error) ? result.error : 'PDF生成失败';
-        console.error('导出PDF失败:', errMsg, result);
-        throw new Error(errMsg);
-      }
-
-      const fileID = result.fileID;
-      if (!fileID) {
-        throw new Error('PDF生成失败');
-      }
-
-      const tempUrlRes = await wx.cloud.getTempFileURL({ fileList: [fileID] });
-      const tempUrl = tempUrlRes && tempUrlRes.fileList && tempUrlRes.fileList[0] && tempUrlRes.fileList[0].tempFileURL;
-      if (!tempUrl) {
-        throw new Error('获取下载链接失败');
-      }
-
-      const downloadRes = await new Promise((resolve, reject) => {
-        wx.downloadFile({
-          url: tempUrl,
-          success: resolve,
-          fail: reject
+      const pageData = this.buildPdfPages(fileName);
+      setTarget(8);
+      startDrift(18, 1, 160);
+      const chunkCount = Math.ceil(pageData.pages.length / 30);
+      progressTotal = chunkCount * 3 + 1;
+      updateTargetBySteps(progressDone, progressTotal);
+      if (pageData.pages.length > 30) {
+        await new Promise((resolve) => {
+          wx.showModal({
+            title: '提示',
+            content: `当前共 ${pageData.pages.length} 页，将按每30页自动分卷导出。`,
+            confirmText: '知道了',
+            showCancel: false,
+            success: () => resolve()
+          });
         });
-      });
-      console.log('[PDF] download status:', downloadRes && downloadRes.statusCode);
-      progressDone += 1;
-      updateProgress();
+      }
+      const savedPaths = [];
+      const savedNames = [];
+      for (let i = 0; i < chunkCount; i++) {
+        const start = i * 30;
+        const end = start + 30;
+        const chunkPages = pageData.pages.slice(start, end);
+        if (chunkPages.length === 0) continue;
 
-      const savedPath = await this.savePdfFile(downloadRes.tempFilePath, fileName);
-      console.log('[PDF] savedPath:', savedPath);
-      progressDone += 1;
-      updateProgress();
+        startDrift(70, 1, 160);
+        const pdfRes = await wx.cloud.callFunction({
+          name: 'exportActivityPdf',
+          data: {
+            pages: chunkPages,
+            pageWidth: pageData.pageWidth,
+            pageHeight: pageData.pageHeight,
+            padding: pageData.padding,
+            lineHeight: pageData.lineHeight
+          }
+        });
+        progressDone += 1;
+        updateTargetBySteps(progressDone, progressTotal);
+        setTarget(72);
+
+        const result = pdfRes && pdfRes.result ? pdfRes.result : null;
+        if (!result || result.success === false) {
+          const errMsg = (result && result.error) ? result.error : 'PDF生成失败';
+          console.error('导出PDF失败:', errMsg, result);
+          throw new Error(errMsg);
+        }
+
+        const fileID = result.fileID;
+        if (!fileID) {
+          throw new Error('PDF生成失败');
+        }
+
+        startDrift(82, 1, 180);
+        let tempUrlRes;
+        try {
+          tempUrlRes = await wx.cloud.getTempFileURL({ fileList: [fileID] });
+          console.log('[PDF] tempUrlRes:', tempUrlRes);
+        } catch (e) {
+          console.error('[PDF] getTempFileURL failed:', e);
+          throw e;
+        }
+        const tempUrl = tempUrlRes && tempUrlRes.fileList && tempUrlRes.fileList[0] && tempUrlRes.fileList[0].tempFileURL;
+        if (!tempUrl) {
+          throw new Error('获取下载链接失败');
+        }
+
+        startDrift(88, 1, 180);
+        let downloadRes;
+        try {
+          downloadRes = await new Promise((resolve, reject) => {
+            wx.downloadFile({
+              url: tempUrl,
+              success: resolve,
+              fail: reject
+            });
+          });
+          console.log('[PDF] download status:', downloadRes && downloadRes.statusCode);
+          console.log('[PDF] download path:', downloadRes && downloadRes.tempFilePath);
+        } catch (e) {
+          console.error('[PDF] downloadFile failed:', e);
+          throw e;
+        }
+        progressDone += 1;
+        updateTargetBySteps(progressDone, progressTotal);
+
+        const partName = chunkCount > 1 ? `${baseName}-${String(i + 1).padStart(2, '0')}.pdf` : fileName;
+        startDrift(93, 1, 200);
+        let savedPath;
+        try {
+          savedPath = await this.savePdfFile(downloadRes.tempFilePath, partName);
+          console.log('[PDF] savedPath:', savedPath);
+        } catch (e) {
+          console.error('[PDF] saveFile failed:', e);
+          throw e;
+        }
+        console.log('[PDF] savedPath:', savedPath);
+        savedPaths.push(savedPath);
+        savedNames.push(partName);
+        progressDone += 1;
+        updateTargetBySteps(progressDone, progressTotal);
+        setTarget(96);
+
+        wx.cloud.deleteFile({ fileList: [fileID] }).catch(() => {});
+      }
 
       this.setLastPdfDownloadAt(Date.now());
       this.setData({ pdfReminderShown: true });
 
+      progressDone += 1;
+      updateTargetBySteps(progressDone, progressTotal);
+      setTarget(100);
+      stopProgress();
       wx.hideLoading();
-      const guideText = `文件：${fileName} \n如需保存在本地：\n1) 在预览页右上角点击“...”\n2) 选择“转发给朋友”或“保存到手机”`;
-      this._pendingPdfPath = savedPath;
+      const nameLine = savedNames.length > 1 ? `文件名：\n${savedNames.join('\n')}` : `文件名：${savedNames[0] || fileName}`;
+      const guideText = `${nameLine}\n如需保存在本地：\n1) 在预览页右上角点击“...”\n2) 选择“转发给朋友”或“保存到手机”`;
+      this._pendingPdfPath = savedPaths[0] || '';
       this.setData({
         showPdfGuideModal: true,
         pdfGuideText: guideText
       });
 
-      // 清理云端临时文件
-      const cleanupIds = [fileID].concat(uploads.map(u => u.fileID));
-      wx.cloud.deleteFile({ fileList: cleanupIds }).catch(() => {});
+      // 云端文件已在下载后删除
     } catch (e) {
       console.error('导出PDF失败:', e);
+      stopProgress();
       wx.hideLoading();
       wx.showToast({ title: '生成失败', icon: 'none' });
     }
@@ -1561,14 +1669,14 @@ Page({
     return results;
   },
 
-  buildPdfPages() {
+  buildPdfPages(fileName) {
     const activity = this.data.activity || {};
     const bills = this.data.rawBills || [];
     const members = this.data.members || [];
     const rawRecharges = this.data.rawRecharges || [];
     const isPrepaid = this.data.isPrepaid || false;
     const keeper = this.data.keeper || '';
-    const defaultFileName = `${activity.name || '活动'}-${this.formatYymmdd(new Date())}.pdf`;
+    const defaultFileName = fileName || `${activity.name || '活动'}-${this.formatYymmdd(new Date())}.pdf`;
 
     const pageWidth = 820;
     const pageHeight = 1200;
@@ -1600,9 +1708,6 @@ Page({
       pushLine({ type: 'text', text, fontSize: 24, color: '#15803d', bold: true, role: 'title' });
     };
 
-    const addPurpleTitle = (text) => {
-      pushLine({ type: 'text', text, fontSize: 22, color: '#7c3aed', bold: true, role: 'title' });
-    };
 
     const addGreenNote = (text) => {
       pushLine({ type: 'text', text, fontSize: 20, color: '#15803d', bold: false, role: 'title' });
@@ -1610,6 +1715,10 @@ Page({
 
     const addText = (text) => {
       pushLine({ type: 'text', text, fontSize: 20, color: '#111111', role: 'body' });
+    };
+
+    const addBoldText = (text) => {
+      pushLine({ type: 'text', text, fontSize: 20, color: '#111111', role: 'body', bold: true, boldNoScale: true });
     };
 
     const wrapTextToLines = (text, width, fontSize) => {
@@ -1655,6 +1764,18 @@ Page({
       }
     };
 
+    const detailMap = {};
+    const noIncomeExpenseMembers = [];
+    members.forEach((m) => {
+      const name = m.name || '';
+      if (!name) return;
+      const details = this.buildMemberBillDetails(name, bills, rawRecharges, isPrepaid, keeper);
+      detailMap[name] = details;
+      if (details.incomeBills.length === 0 && details.expenseBills.length === 0) {
+        noIncomeExpenseMembers.push(name);
+      }
+    });
+
     // 活动信息
     addTitle('活动信息');
     const activityName = activity.name || '未命名活动';
@@ -1670,7 +1791,7 @@ Page({
     addText(`活动属性：${prepaidInfo}`);
     addText(`账单范围：${this.data.dateRange || '至今'}，账单数量：${bills.length} 条`);
     addText(`导出时间：${exportTime}`);
-    addText(`PDF文件：${defaultFileName}`);
+    addText(`PDF文件：${this.normalizeAsciiDigits(defaultFileName)}`);
 
     pushBlank();
 
@@ -1728,6 +1849,7 @@ Page({
 
     members.forEach((m) => {
       const name = m.name || '';
+      if (noIncomeExpenseMembers.indexOf(name) !== -1) return;
       addRow([
         { text: name, x: 0, width: memberColName },
         { text: `¥${m.bal ? m.bal.paid : '0.0'}`, x: memberColName, width: memberColPaid },
@@ -1741,7 +1863,8 @@ Page({
     members.forEach((m) => {
       const memberName = m.name || '';
       if (!memberName) return;
-      const details = this.buildMemberBillDetails(memberName, bills, rawRecharges, isPrepaid, keeper);
+      if (noIncomeExpenseMembers.indexOf(memberName) !== -1) return;
+      const details = detailMap[memberName] || this.buildMemberBillDetails(memberName, bills, rawRecharges, isPrepaid, keeper);
 
       addMemberTitle(`${memberName} 结算信息`);
 
@@ -1750,7 +1873,7 @@ Page({
       const balance = this.formatAmount(Number(m.bal ? m.bal.balance : 0));
       pushLine({ type: 'text', text: `收入：¥${this.formatAmount(incomeTotal)}  支出：¥${this.formatAmount(expenseTotal)}  余额：¥${balance}`, fontSize: 20, color: '#111111', bold: false });
 
-      addPurpleTitle(`${memberName} 收入信息`);
+      addBoldText(`${memberName} 收入信息`);
       const incomeColTitle = 260;
       const incomeColCounter = 200;
       const incomeColAmount = 110;
@@ -1774,7 +1897,7 @@ Page({
         });
       }
 
-      addPurpleTitle(`${memberName} 支出信息`);
+      addBoldText(`${memberName} 支出信息`);
       const expenseColTitle = 260;
       const expenseColCounter = 200;
       const expenseColAmount = 110;
@@ -1801,13 +1924,6 @@ Page({
       pushBlank();
     });
 
-    const noIncomeExpenseMembers = members
-      .map(m => m.name || '')
-      .filter(Boolean)
-      .filter(name => {
-        const details = this.buildMemberBillDetails(name, bills, rawRecharges, isPrepaid, keeper);
-        return details.incomeBills.length === 0 && details.expenseBills.length === 0;
-      });
     if (noIncomeExpenseMembers.length > 0) {
       addGreenNote(`${noIncomeExpenseMembers.join('、')} 没有产生收入和支出`);
     }
@@ -1820,23 +1936,28 @@ Page({
       const y = padding + index * lineHeight;
       const fontSize = line.fontSize || 18;
       const color = line.color || '#111111';
+      ctx.save();
+      ctx.setTextAlign('left');
+      ctx.setTextBaseline('top');
       ctx.setFontSize(fontSize);
       ctx.setFillStyle('#111111');
       if (line.type === 'row') {
         line.columns.forEach((col) => {
           ctx.setFontSize(fontSize);
-          ctx.setFillStyle(col.color || '#111111');
+          ctx.setFillStyle('#111111');
           const rawText = String(col.text || '');
           const text = col.noTruncate ? rawText : this.truncateText(ctx, rawText, col.width - 6);
           ctx.fillText(text, padding + col.x, y);
         });
       } else {
         const isTitle = line.role === 'title';
-        ctx.setFontSize(line.bold ? fontSize + 1 : fontSize);
+        const boldDelta = line.bold && !line.boldNoScale ? 1 : 0;
+        ctx.setFontSize(fontSize + boldDelta);
         ctx.setFillStyle(isTitle ? color : '#111111');
         const text = String(line.text || '');
         ctx.fillText(text, padding, y);
       }
+      ctx.restore();
     });
   },
 

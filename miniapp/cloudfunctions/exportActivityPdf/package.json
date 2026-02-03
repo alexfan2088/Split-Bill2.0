@@ -4,6 +4,7 @@
   "description": "活动信息导出PDF",
   "main": "index.js",
   "dependencies": {
+    "@pdf-lib/fontkit": "^1.1.1",
     "pdf-lib": "^1.17.1",
     "wx-server-sdk": "~2.6.3"
   }
