@@ -71,6 +71,10 @@ Page({
   
   onShow() {
     // 每次显示页面时刷新数据
+    if (this._pendingTempCleanup) {
+      this._pendingTempCleanup = false;
+      this._cleanupOpenedPdfTemp();
+    }
     if (this.data.activityId) {
       this.loadActivityData();
     }
@@ -1404,9 +1408,16 @@ Page({
   },
 
   sanitizeFileName(name) {
-    const safe = (name || '').replace(/[\\/:*?"<>|]/g, '_').trim();
-    if (!safe) return '活动信息.pdf';
-    return safe.toLowerCase().endsWith('.pdf') ? safe : `${safe}.pdf`;
+    const base = String(name || '')
+      .replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, '') // strip emoji surrogate pairs
+      .replace(/[\x00-\x1F\x7F]/g, '')
+      .replace(/[\\/:*?"<>|]/g, '_')
+      .replace(/[^\w\u4E00-\u9FFF·\-\.\s]/g, '_')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const trimmed = base.length > 60 ? base.slice(0, 60).trim() : base;
+    if (!trimmed) return '活动信息.pdf';
+    return trimmed.toLowerCase().endsWith('.pdf') ? trimmed : `${trimmed}.pdf`;
   },
 
   async downloadActivityPdf() {
@@ -1416,7 +1427,8 @@ Page({
     }
 
     const now = new Date();
-    const defaultName = `${this.data.activity.name || '活动'}-${this.formatYymmdd(now)}${this.formatHhmmss(now)}.pdf`;
+    const activityName = this.normalizeAsciiDigits(this.data.activity.name || '活动');
+    const defaultName = `${activityName}-${this.formatYymmdd(now)}${this.formatHhmmss(now)}.pdf`;
     const fileName = this.sanitizeFileName(this.normalizeAsciiDigits(defaultName));
     const baseName = fileName.replace(/\.pdf$/i, '');
 
@@ -1472,6 +1484,7 @@ Page({
     wx.showLoading({ title: '文件正在生成...1%' });
     startProgress();
     try {
+      await this.cleanupOldPdfFiles(200);
       const pageData = this.buildPdfPages(fileName);
       setTarget(8);
       startDrift(18, 1, 160);
@@ -1559,15 +1572,7 @@ Page({
 
         const partName = chunkCount > 1 ? `${baseName}-${String(i + 1).padStart(2, '0')}.pdf` : fileName;
         startDrift(93, 1, 200);
-        let savedPath;
-        try {
-          savedPath = await this.savePdfFile(downloadRes.tempFilePath, partName);
-          console.log('[PDF] savedPath:', savedPath);
-        } catch (e) {
-          console.error('[PDF] saveFile failed:', e);
-          throw e;
-        }
-        console.log('[PDF] savedPath:', savedPath);
+        const savedPath = downloadRes.tempFilePath;
         savedPaths.push(savedPath);
         savedNames.push(partName);
         progressDone += 1;
@@ -1604,8 +1609,23 @@ Page({
 
   async savePdfFile(tempFilePath, fileName) {
     const fs = wx.getFileSystemManager();
-    const targetPath = `${wx.env.USER_DATA_PATH}/${fileName}`;
+    const safeName = this.sanitizeFileName(fileName);
+    const targetPath = `${wx.env.USER_DATA_PATH}/${safeName}`;
     try {
+      try {
+        await new Promise((resolve) => {
+          fs.access({
+            path: targetPath,
+            success: () => {
+              try {
+                fs.unlinkSync(targetPath);
+              } catch (e) {}
+              resolve();
+            },
+            fail: () => resolve()
+          });
+        });
+      } catch (e) {}
       const res = await new Promise((resolve, reject) => {
         fs.saveFile({
           tempFilePath,
@@ -1616,14 +1636,109 @@ Page({
       });
       return res.savedFilePath || targetPath;
     } catch (e) {
-      const res = await new Promise((resolve, reject) => {
-        wx.saveFile({
-          tempFilePath,
-          success: resolve,
+      if (e && e.errno === 1300202) {
+        await this.cleanupOldPdfFiles(20);
+        try {
+          const res = await new Promise((resolve, reject) => {
+            fs.saveFile({
+              tempFilePath,
+              filePath: targetPath,
+              success: resolve,
+              fail: reject
+            });
+          });
+          return res.savedFilePath || targetPath;
+        } catch (retryErr) {
+          console.error('[PDF] saveFile retry failed:', retryErr);
+          throw retryErr;
+        }
+      }
+      console.error('[PDF] saveFile failed:', e);
+      const fallbackName = this.sanitizeFileName(`活动信息-${this.formatYymmdd(new Date())}${this.formatHhmmss(new Date())}.pdf`);
+      const fallbackPath = `${wx.env.USER_DATA_PATH}/${fallbackName}`;
+      try {
+        const res = await new Promise((resolve, reject) => {
+          fs.saveFile({
+            tempFilePath,
+            filePath: fallbackPath,
+            success: resolve,
+            fail: reject
+          });
+        });
+        return res.savedFilePath || fallbackPath;
+      } catch (err) {
+        console.error('[PDF] saveFile fallback failed:', err);
+        const res = await new Promise((resolve, reject) => {
+          wx.saveFile({
+            tempFilePath,
+            success: resolve,
+            fail: reject
+          });
+        });
+        const savedPath = res.savedFilePath;
+        if (savedPath) {
+          try {
+            try {
+              fs.unlinkSync(targetPath);
+            } catch (e2) {}
+            await new Promise((resolve, reject) => {
+              fs.rename({
+                oldPath: savedPath,
+                newPath: targetPath,
+                success: resolve,
+                fail: reject
+              });
+            });
+            return targetPath;
+          } catch (renameErr) {
+            console.error('[PDF] rename failed:', renameErr);
+          }
+        }
+        return savedPath;
+      }
+    }
+  },
+
+  async cleanupOldPdfFiles(maxDelete = 10) {
+    const fs = wx.getFileSystemManager();
+    let files = [];
+    try {
+      files = await new Promise((resolve, reject) => {
+        fs.readdir({
+          dirPath: wx.env.USER_DATA_PATH,
+          success: res => resolve(res.files || []),
           fail: reject
         });
       });
-      return res.savedFilePath;
+    } catch (e) {
+      console.error('[PDF] readdir failed:', e);
+      return;
+    }
+    const pdfs = files.filter(name => /\.pdf$/i.test(name));
+    if (pdfs.length === 0) return;
+    const stats = [];
+    for (const name of pdfs) {
+      const path = `${wx.env.USER_DATA_PATH}/${name}`;
+      try {
+        const statRes = await new Promise((resolve, reject) => {
+          fs.stat({
+            path,
+            success: resolve,
+            fail: reject
+          });
+        });
+        const mtime = statRes && statRes.stats ? statRes.stats.lastModifiedTime || 0 : 0;
+        stats.push({ path, mtime });
+      } catch (e) {
+        stats.push({ path, mtime: 0 });
+      }
+    }
+    stats.sort((a, b) => a.mtime - b.mtime);
+    const toDelete = stats.slice(0, Math.min(maxDelete, stats.length));
+    for (const item of toDelete) {
+      try {
+        fs.unlinkSync(item.path);
+      } catch (e) {}
     }
   },
 
@@ -2270,8 +2385,26 @@ Page({
       wx.openDocument({
         filePath: path,
         fileType: 'pdf',
-        showMenu: true
+        showMenu: true,
+        complete: () => {
+          this._lastOpenedPdfPath = path;
+          this._pendingTempCleanup = true;
+        }
       });
     }
+  },
+
+  _cleanupOpenedPdfTemp() {
+    const path = this._lastOpenedPdfPath;
+    this._lastOpenedPdfPath = '';
+    if (!path || !/^wxfile:\/\/tmp_/.test(path)) return;
+    try {
+      const fs = wx.getFileSystemManager();
+      fs.unlink({
+        filePath: path,
+        success: () => {},
+        fail: () => {}
+      });
+    } catch (e) {}
   }
 });
