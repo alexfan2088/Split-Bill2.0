@@ -3,7 +3,8 @@
   <view class="form">
     <view class="form-item">
       <text class="label">金额（元）</text>
-      <input class="input" type="digit" placeholder="0.00" value="{{amount}}" bindinput="onAmountInput" disabled="{{isReadOnly}}" />
+      <input class="input" type="text" placeholder="0.00" value="{{amount}}" bindinput="onAmountInput" disabled="{{isReadOnly}}" />
+      <text class="hint">可输入 3+5= 自动计算</text>
     </view>
     
     <view class="form-item">
@@ -79,4 +80,3 @@
     </view>
   </view>
 </view>
-

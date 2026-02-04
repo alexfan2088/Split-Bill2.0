@@ -24,6 +24,29 @@ App({
     
     // 获取用户信息
     this.getUserInfo();
+
+    // 启动时清理本地缓存的 PDF，避免历史 tmp 文件名影响展示
+    this.clearCachedPdfFiles();
+  },
+
+  clearCachedPdfFiles() {
+    try {
+      const fs = wx.getFileSystemManager();
+      fs.readdir({
+        dirPath: wx.env.USER_DATA_PATH,
+        success: (res) => {
+          const files = (res && res.files) || [];
+          const pdfs = files.filter(name => /\.pdf$/i.test(name));
+          pdfs.forEach((name) => {
+            const path = `${wx.env.USER_DATA_PATH}/${name}`;
+            try {
+              fs.unlinkSync(path);
+            } catch (e) {}
+          });
+        },
+        fail: () => {}
+      });
+    } catch (e) {}
   },
   
   getUserInfo() {
@@ -42,5 +65,4 @@ App({
     currentActivityBalances: {},
   }
 });
-
 

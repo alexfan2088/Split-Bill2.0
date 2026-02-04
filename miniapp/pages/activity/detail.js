@@ -1572,7 +1572,7 @@ Page({
 
         const partName = chunkCount > 1 ? `${baseName}-${String(i + 1).padStart(2, '0')}.pdf` : fileName;
         startDrift(93, 1, 200);
-        const savedPath = downloadRes.tempFilePath;
+        const savedPath = await this.savePdfFile(downloadRes.tempFilePath, partName);
         savedPaths.push(savedPath);
         savedNames.push(partName);
         progressDone += 1;
@@ -1613,18 +1613,18 @@ Page({
     const targetPath = `${wx.env.USER_DATA_PATH}/${safeName}`;
     try {
       try {
-        await new Promise((resolve) => {
-          fs.access({
-            path: targetPath,
-            success: () => {
-              try {
-                fs.unlinkSync(targetPath);
-              } catch (e) {}
-              resolve();
-            },
-            fail: () => resolve()
+        const exists = await new Promise((resolve) => {
+          fs.readdir({
+            dirPath: wx.env.USER_DATA_PATH,
+            success: res => resolve((res.files || []).includes(safeName)),
+            fail: () => resolve(false)
           });
         });
+        if (exists) {
+          try {
+            fs.unlinkSync(targetPath);
+          } catch (e) {}
+        }
       } catch (e) {}
       const res = await new Promise((resolve, reject) => {
         fs.saveFile({
