@@ -757,7 +757,8 @@ Page({
         const amount = Number(r.amount || 0);
         const payer = r.payer; // 预存人（充值的人）
         console.log(`充值记录 - 预存人: ${payer}, 金额: ${amount}`);
-        if (payer && map[payer]) {
+        // 预存模式下，保管人给自己充值不计入实付（避免主结算与明细余额不一致）
+        if (payer && map[payer] && payer !== keeper) {
           map[payer].paid += amount;
           console.log(`更新预存人 ${payer} 的实付: ${map[payer].paid}`);
         }
@@ -966,6 +967,7 @@ Page({
           };
         });
     }
+
     
     // 计算收入总额
     let incomeTotal = 0;
@@ -2163,6 +2165,7 @@ Page({
         }));
       expenseBills = expenseBills.concat(rechargeBills);
     }
+    
 
     const billExpenses = rawBills
       .filter(b => {
