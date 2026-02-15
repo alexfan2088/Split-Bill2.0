@@ -8,7 +8,9 @@ Page({
     activityId: '',
     name: '',
     type: '',
-    membersText: '',
+    members: [],
+    memberNames: [],
+    newMemberName: '',
     remark: '',
     isPrepaid: false, // 是否预存
     originalIsPrepaid: false, // 原始活动的预存状态（用于编辑时判断）
@@ -16,6 +18,7 @@ Page({
     keeper: '', // 保管人员
     keeperList: [], // 保管人员列表（从成员中选择）
     creator: '', // 活动创建者
+    originalMemberNames: [], // 编辑前的成员列表（用于同步账单成员）
     defaultTypes: ['聚餐', '秋秋妹', '麻将', '掼蛋', '公园'], // 系统默认类型（不可删除）
     commonTypes: ['聚餐', '秋秋妹', '麻将', '掼蛋', '公园'], // 常用类型（包含系统类型和自定义类型）
     remarkEditing: false, // 备注是否在编辑状态
@@ -91,16 +94,16 @@ Page({
           activityId: activity._id,
           name: activity.name || '',
           type: activity.type || '',
-          membersText: memberNames.join('\n'),
           remark: activity.remark || '',
           remarkEditing: true, // 编辑模式始终显示textarea
           isPrepaid: originalIsPrepaid,
           originalIsPrepaid: originalIsPrepaid, // 保存原始值
           showPrepaidOption: originalIsPrepaid, // 只有原始活动是预存时才显示
           keeper: activity.keeper || '',
-          keeperList: memberNames.map(name => ({ name })),
           creator: creator,
+          originalMemberNames: memberNames,
         });
+        this.setMembersFromNames(memberNames);
         wx.setNavigationBarTitle({
           title: '编辑活动'
         });
@@ -114,9 +117,7 @@ Page({
     } else {
       // 新建模式，自动将创建者添加到第一位
       if (userName) {
-        this.setData({
-          membersText: userName
-        });
+        this.setMembersFromNames([userName]);
       }
       
       // 自动填写备注说明
@@ -273,67 +274,244 @@ Page({
     }
   },
   
-  onMembersInput(e) {
-    const inputValue = e.detail.value;
-    const previousValue = this.data.membersText;
-    const creator = this.data.creator;
-    
-    if (!creator) {
-      this.setData({ membersText: inputValue });
+  setMembersFromNames(memberNames) {
+    const creator = this.data.creator || db.getCurrentUser();
+    let names = (memberNames || []).filter(Boolean);
+    if (creator) {
+      names = names.filter(n => n !== creator);
+      names.unshift(creator);
+    }
+    const members = names.map(name => ({ name, active: true }));
+    this.setData({
+      members,
+      memberNames: names,
+      keeperList: names.map(name => ({ name })),
+    });
+    if (this.data.keeper && !names.includes(this.data.keeper)) {
+      this.setData({ keeper: '' });
+    }
+  },
+
+  onNewMemberInput(e) {
+    this.setData({ newMemberName: e.detail.value });
+  },
+
+  addMember() {
+    const name = (this.data.newMemberName || '').trim();
+    if (!name) {
+      wx.showToast({
+        title: '请输入成员姓名',
+        icon: 'none'
+      });
       return;
     }
-    
-    // 检查创建者是否被删除
-    const previousLines = previousValue.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-    const currentLines = inputValue.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-    
-    // 检查第一行是否是创建者（完整匹配）
-    const firstLineIsCreator = currentLines.length > 0 && currentLines[0] === creator;
-    
-    // 如果之前第一行是创建者，但现在第一行不是创建者，说明创建者被删除了
-    if (previousLines.length > 0 && previousLines[0] === creator && !firstLineIsCreator) {
-      // 创建者被删除了，弹出对话框提示
-      wx.showModal({
-        title: '提示',
-        content: '创建者不可删除，已自动恢复。',
-        showCancel: false,
-        confirmText: '确定',
-        success: () => {
-          // 清理所有行，移除第一行（可能是创建者的部分字符）和任何完全匹配创建者的行
-          const cleanLines = currentLines.filter((name, index) => {
-            // 移除第一行（可能是创建者的部分字符）
-            if (index === 0) return false;
-            // 移除完全匹配创建者的行
-            if (name === creator) return false;
-            return true;
-          });
-          
-          // 确保创建者在第一位
-          const newLines = [creator, ...cleanLines];
-          this.setData({ membersText: newLines.join('\n') });
-          
-          // 如果已经选择了预存，同步更新保管人员列表
-          if (this.data.isPrepaid) {
-            this.setData({
-              keeperList: newLines.map(name => ({ name }))
+    const memberNames = this.data.memberNames || [];
+    if (memberNames.includes(name)) {
+      wx.showToast({
+        title: '成员已存在',
+        icon: 'none'
+      });
+      return;
+    }
+    const updatedNames = [...memberNames, name];
+    this.setMembersFromNames(updatedNames);
+    this.setData({ newMemberName: '' });
+  },
+
+  onMemberLongPress(e) {
+    const name = e.currentTarget.dataset.name;
+    if (!name) return;
+    const creator = this.data.creator || db.getCurrentUser();
+    wx.showActionSheet({
+      itemList: ['修改名字', '删除成员'],
+      success: (res) => {
+        if (res.tapIndex === 0) {
+          if (this.data.isEdit) {
+            this.renameMember(name);
+          } else {
+            this.renameMemberLocal(name);
+          }
+        } else if (res.tapIndex === 1) {
+          if (name === creator) {
+            wx.showToast({
+              title: '创建者不可删除',
+              icon: 'none'
             });
+            return;
+          }
+          if (this.data.isEdit) {
+            this.deleteMember(name);
+          } else {
+            this.deleteMemberLocal(name);
           }
         }
-      });
-      return; // 不更新输入框，等待对话框关闭后自动恢复
+      }
+    });
+  },
+
+  renameMemberLocal(oldName) {
+    const memberNames = this.data.memberNames || [];
+    wx.showModal({
+      title: oldName,
+      content: '',
+      editable: true,
+      placeholderText: '输入新名字',
+      success: (modalRes) => {
+        if (!modalRes.confirm) return;
+        const newName = (modalRes.content || '').trim();
+        if (!newName) {
+          wx.showToast({ title: '请输入新名字', icon: 'none' });
+          return;
+        }
+        if (newName === oldName) {
+          wx.showToast({ title: '名字未改变', icon: 'none' });
+          return;
+        }
+        if (memberNames.includes(newName)) {
+          wx.showToast({ title: '成员已存在', icon: 'none' });
+          return;
+        }
+        const updatedNames = memberNames.map(n => (n === oldName ? newName : n));
+        this.setMembersFromNames(updatedNames);
+        if (this.data.keeper === oldName) {
+          this.setData({ keeper: newName });
+        }
+      }
+    });
+  },
+
+  deleteMemberLocal(name) {
+    const updatedNames = (this.data.memberNames || []).filter(n => n !== name);
+    this.setMembersFromNames(updatedNames);
+    if (this.data.keeper === name) {
+      this.setData({ keeper: '' });
     }
-    
-    this.setData({ membersText: inputValue });
-    
-    // 如果已经选择了预存，同步更新保管人员列表
-    if (this.data.isPrepaid) {
-      const memberNames = inputValue.split('\n')
-        .map(line => line.trim())
-        .filter(line => line.length > 0);
-      this.setData({
-        keeperList: memberNames.map(name => ({ name }))
+  },
+
+  renameMember(oldName) {
+    const userName = db.getCurrentUser();
+    const passwordHash = db.getCurrentUserPasswordHash();
+    if (!userName || !passwordHash) {
+      wx.showToast({
+        title: '请先登录',
+        icon: 'none'
       });
+      return;
     }
+    const memberNames = this.data.memberNames || [];
+    wx.showModal({
+      title: oldName,
+      content: '',
+      editable: true,
+      placeholderText: '输入新名字',
+      success: async (modalRes) => {
+        if (!modalRes.confirm) return;
+        const newName = (modalRes.content || '').trim();
+        if (!newName) {
+          wx.showToast({ title: '请输入新名字', icon: 'none' });
+          return;
+        }
+        if (newName === oldName) {
+          wx.showToast({ title: '名字未改变', icon: 'none' });
+          return;
+        }
+        if (memberNames.includes(newName)) {
+          wx.showToast({ title: '成员已存在', icon: 'none' });
+          return;
+        }
+
+        wx.showLoading({ title: '同步中...' });
+        try {
+          const cfRes = await wx.cloud.callFunction({
+            name: 'activityOps',
+            data: {
+              action: 'renameMembersByMap',
+              activityId: this.data.activityId,
+              userName,
+              passwordHash,
+              renameMap: { [oldName]: newName }
+            }
+          });
+          const result = (cfRes && cfRes.result) ? cfRes.result : {};
+          if (!result.success) {
+            wx.hideLoading();
+            wx.showToast({
+              title: result.error || '同步失败',
+              icon: 'none',
+              duration: 3000
+            });
+            return;
+          }
+          const updatedNames = memberNames.map(n => (n === oldName ? newName : n));
+          this.setMembersFromNames(updatedNames);
+          const updatedOriginal = (this.data.originalMemberNames || [])
+            .map(n => (n === oldName ? newName : n));
+          const nextKeeper = this.data.keeper === oldName ? newName : this.data.keeper;
+          this.setData({
+            originalMemberNames: updatedOriginal,
+            keeper: nextKeeper
+          });
+          wx.hideLoading();
+          wx.showToast({ title: '修改成功', icon: 'success' });
+        } catch (e) {
+          wx.hideLoading();
+          wx.showToast({ title: '同步失败', icon: 'none' });
+          console.error('同步改名失败:', e);
+        }
+      }
+    });
+  },
+
+  async deleteMember(name) {
+    const userName = db.getCurrentUser();
+    const passwordHash = db.getCurrentUserPasswordHash();
+    if (!userName || !passwordHash) {
+      wx.showToast({
+        title: '请先登录',
+        icon: 'none'
+      });
+      return;
+    }
+    wx.showModal({
+      title: '确认删除',
+      content: `确定要删除成员"${name}"吗？`,
+      success: async (res) => {
+        if (!res.confirm) return;
+        wx.showLoading({ title: '删除中...' });
+        try {
+          const cfRes = await wx.cloud.callFunction({
+            name: 'activityOps',
+            data: {
+              action: 'deleteMemberIfNoRecords',
+              activityId: this.data.activityId,
+              userName,
+              passwordHash,
+              memberName: name
+            }
+          });
+          const result = (cfRes && cfRes.result) ? cfRes.result : {};
+          if (!result.success) {
+            wx.hideLoading();
+            wx.showToast({
+              title: result.error || '删除失败',
+              icon: 'none',
+              duration: 3000
+            });
+            return;
+          }
+          const updatedNames = (this.data.memberNames || []).filter(n => n !== name);
+          this.setMembersFromNames(updatedNames);
+          const updatedOriginal = (this.data.originalMemberNames || []).filter(n => n !== name);
+          this.setData({ originalMemberNames: updatedOriginal });
+          wx.hideLoading();
+          wx.showToast({ title: '删除成功', icon: 'success' });
+        } catch (e) {
+          wx.hideLoading();
+          wx.showToast({ title: '删除失败', icon: 'none' });
+          console.error('删除成员失败:', e);
+        }
+      }
+    });
   },
   
   onRemarkInput(e) {
@@ -408,10 +586,8 @@ Page({
     this.setData({ isPrepaid });
     
     // 如果选择预存，初始化保管人员列表
-    if (isPrepaid && this.data.membersText) {
-      const memberNames = this.data.membersText.split('\n')
-        .map(line => line.trim())
-        .filter(line => line.length > 0);
+    if (isPrepaid) {
+      const memberNames = this.data.memberNames || [];
       this.setData({
         keeperList: memberNames.map(name => ({ name }))
       });
@@ -423,12 +599,14 @@ Page({
     const keeper = e.currentTarget.dataset.name;
     this.setData({ keeper });
   },
+
+
+
   
   async saveActivity() {
     const name = this.data.name.trim();
     const type = this.data.type.trim();
     const remark = this.data.remark.trim();
-    const membersText = this.data.membersText.trim();
     
     if (!name) {
       wx.showToast({
@@ -448,19 +626,8 @@ Page({
       return;
     }
     
-    // 解析成员列表
-    let memberNames = membersText.split('\n')
-      .map(line => line.trim())
-      .filter(line => line.length > 0);
-    
-    // 确保创建者在第一位且不可删除
-    const creator = this.data.creator || db.getCurrentUser();
-    if (creator) {
-      // 移除创建者（如果存在）
-      memberNames = memberNames.filter(name => name !== creator);
-      // 将创建者添加到第一位
-      memberNames.unshift(creator);
-    }
+    // 使用当前成员列表
+    let memberNames = (this.data.memberNames || []).slice();
     
     if (memberNames.length === 0) {
       wx.showToast({
@@ -468,6 +635,13 @@ Page({
         icon: 'none'
       });
       return;
+    }
+
+    // 确保创建者在第一位且不可删除
+    const creator = this.data.creator || db.getCurrentUser();
+    if (creator) {
+      memberNames = memberNames.filter(name => name !== creator);
+      memberNames.unshift(creator);
     }
     
     // 检查成员是否有重名
@@ -520,6 +694,16 @@ Page({
       const dbCloud = wx.cloud.database();
       
       if (this.data.isEdit) {
+        const passwordHash = db.getCurrentUserPasswordHash();
+        if (!passwordHash) {
+          wx.hideLoading();
+          wx.showToast({
+            title: '请先登录',
+            icon: 'none'
+          });
+          return;
+        }
+
         // 更新活动
         const updateData = {
           name,
@@ -534,23 +718,30 @@ Page({
         if (this.data.isPrepaid) {
           updateData.keeper = this.data.keeper;
         }
-        await dbCloud.collection('activities').doc(this.data.activityId).update({
-          data: updateData
+
+        // 通过云函数更新活动及同步账单成员
+        const res = await wx.cloud.callFunction({
+          name: 'activityOps',
+          data: {
+            action: 'updateActivity',
+            activityId: this.data.activityId,
+            userName,
+            passwordHash,
+            updateData,
+            originalMemberNames: this.data.originalMemberNames || [],
+            newMemberNames: memberNames
+          }
         });
-        
-        // 更新活动的group
-        const groupRes = await dbCloud.collection('groups')
-          .where({ activityId: this.data.activityId })
-          .limit(1)
-          .get();
-        
-        if (groupRes.data && groupRes.data.length > 0) {
-          await dbCloud.collection('groups').doc(groupRes.data[0]._id).update({
-            data: {
-              members: members,
-              updatedAt: new Date()
-            }
+
+        const result = (res && res.result) ? res.result : {};
+        if (!result.success) {
+          wx.hideLoading();
+          wx.showToast({
+            title: result.error || '保存失败',
+            icon: 'none',
+            duration: 3000
           });
+          return;
         }
         
         wx.hideLoading();
@@ -623,5 +814,3 @@ Page({
     }
   },
 });
-
-

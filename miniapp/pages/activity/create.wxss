@@ -47,12 +47,43 @@
   box-sizing: border-box; /* 包含padding和border */
 }
 
-/* 成员输入框：6行高度，超过自动滚动 */
-.textarea-members {
-  height: 240rpx; /* 6行高度（每行约40rpx） */
-  min-height: 240rpx;
-  max-height: 240rpx; /* 固定高度，超过时滚动 */
-  overflow-y: auto; /* 超过高度时显示滚动条 */
+
+.member-input-row {
+  display: flex;
+  gap: 16rpx;
+  align-items: center;
+}
+
+.member-input {
+  flex: 1;
+}
+
+.member-add-btn {
+  padding: 16rpx 24rpx;
+  font-size: 26rpx;
+  border-radius: 8rpx;
+}
+
+.member-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16rpx;
+  margin-top: 16rpx;
+}
+
+.member-tag {
+  padding: 12rpx 20rpx;
+  border: 2rpx solid #007bff;
+  color: #007bff;
+  border-radius: 8rpx;
+  background-color: #f2f7ff;
+  font-size: 26rpx;
+}
+
+.member-tag-creator {
+  border-color: #28a745;
+  color: #28a745;
+  background-color: #eefaf0;
 }
 
 /* 备注框：自动高度，不限制 */
@@ -108,6 +139,7 @@
   margin-top: 8rpx;
   margin-bottom: 8rpx;
 }
+
 
 .type-tags {
   display: flex;
@@ -174,5 +206,3 @@
   color: #007bff;
   font-weight: 500;
 }
-
-

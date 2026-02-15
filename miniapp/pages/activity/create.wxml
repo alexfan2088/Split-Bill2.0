@@ -17,9 +17,18 @@
     </view>
     
     <view class="form-item">
-      <text class="label">参与成员（<text class="label-highlight">输入姓名，每行一个</text>）</text>
+      <text class="label">参与成员（<text class="label-highlight">逐个添加</text>）</text>
       <view class="hint">提示：创建者（{{creator}}）会自动添加在第一位，且不可删除</view>
-      <textarea class="textarea textarea-members" placeholder="每行输入一个成员姓名" value="{{membersText}}" bindinput="onMembersInput" />
+      <view class="member-input-row">
+        <input class="input member-input" type="text" placeholder="输入成员姓名" value="{{newMemberName}}" bindinput="onNewMemberInput" maxlength="20" />
+        <button class="btn btn-secondary member-add-btn" bindtap="addMember">添加</button>
+      </view>
+      <view class="member-tags">
+        <view wx:for="{{memberNames}}" wx:key="name" class="member-tag {{item === creator ? 'member-tag-creator' : ''}}" bindlongpress="onMemberLongPress" data-name="{{item}}">
+          {{item}}
+        </view>
+      </view>
+      <view wx:if="{{isEdit}}" class="hint">长按成员名字，可以进行修改或删除</view>
     </view>
     
     <view class="form-item">
@@ -57,5 +66,3 @@
     <button class="btn btn-full" bindtap="saveActivity">{{isEdit ? '更新' : '创建'}}</button>
   </view>
 </view>
-
-
