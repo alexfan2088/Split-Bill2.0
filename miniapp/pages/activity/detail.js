@@ -1,5 +1,6 @@
 // pages/activity/detail.js
 const db = require('../../utils/db.js');
+const settlement = require('../../utils/settlement.js');
 const app = getApp();
 
 Page({
@@ -543,6 +544,11 @@ Page({
         remaining: this.formatAmount(remaining),
       });
 
+      // 如果当前在成员账单弹窗中，刷新明细
+      if (this.data.showMemberBills && this.data.selectedMemberName) {
+        this.showMemberBillsForName(this.data.selectedMemberName);
+      }
+
       // 检查是否需要提示下载PDF
       this.checkPdfDownloadReminder(activity);
       
@@ -600,7 +606,7 @@ Page({
     
     // 第一个圆：付款人（蓝色）
     if (payer) {
-      const payerSurname = payer.charAt(0);
+      const payerSurname = payer.slice(-1);
       circles.push({
         type: 'solid',
         surname: payerSurname,
@@ -617,7 +623,7 @@ Page({
     
     // 第二个圆：记录人（绿色）
     if (recorder) {
-      const recorderSurname = recorder.charAt(0);
+      const recorderSurname = recorder.slice(-1);
       circles.push({
         type: 'solid',
         surname: recorderSurname,
@@ -653,7 +659,7 @@ Page({
           
           sectors.push({
             name: name,
-            surname: name.charAt(0),
+            surname: name.slice(-1),
             weight: weight,
             proportion: proportion, // 占比
             startAngleRad: currentAngleRad, // 起始弧度
@@ -742,100 +748,17 @@ Page({
   
   // 计算余额
   calcBalances(members, bills, recharges = [], keeper = '') {
-    const map = {};
-    members.forEach(m => {
-      map[m.name] = { paid: 0, shouldPay: 0, balance: 0 };
-    });
-    
-    // 如果是预存活动
-    if (recharges.length > 0 && keeper) {
-      console.log('计算实付 - 预存模式，保管人:', keeper);
-      console.log('充值记录数量:', recharges.length);
-      
-      // 1. 预存人的实付 = 充值金额（充值记录中的payer）
-      recharges.forEach(r => {
-        const amount = Number(r.amount || 0);
-        const payer = r.payer; // 预存人（充值的人）
-        console.log(`充值记录 - 预存人: ${payer}, 金额: ${amount}`);
-        // 预存模式下，保管人给自己充值不计入实付（避免主结算与明细余额不一致）
-        if (payer && map[payer] && payer !== keeper) {
-          map[payer].paid += amount;
-          console.log(`更新预存人 ${payer} 的实付: ${map[payer].paid}`);
-        }
-      });
-      
-      // 2. 保管人的实付 = 账单付款金额（因为保管人实际支付了账单）
-      bills.forEach(b => {
-        const amount = Number(b.amount || 0);
-        const billPayer = b.payer; // 账单付款人（通常是保管人）
-        console.log(`账单 - 付款人: ${billPayer}, 金额: ${amount}`);
-        if (billPayer && map[billPayer]) {
-          map[billPayer].paid += amount;
-          console.log(`更新付款人 ${billPayer} 的实付: ${map[billPayer].paid}`);
-        }
-      });
-      
-      // 3. 保管人的应付 = 收到的充值金额总和
-      let keeperRechargeTotal = 0;
-      recharges.forEach(r => {
-        const amount = Number(r.amount || 0);
-        if (r.keeper === keeper) {
-          keeperRechargeTotal += amount;
-        }
-      });
-      if (map[keeper]) {
-        map[keeper].shouldPay = keeperRechargeTotal;
-        console.log(`保管人 ${keeper} 的应付（充值总额）: ${keeperRechargeTotal}`);
-      }
-      
-      // 4. 其他成员的应付按账单分摊计算（不包括保管人）
-      bills.forEach(b => {
-        if (b.splitDetail) {
-          Object.keys(b.splitDetail).forEach(name => {
-            if (!map[name] || name === keeper) return; // 跳过保管人
-            // 只有权重大于0的成员才计算应付
-            if (b.participants && b.participants[name] > 0) {
-              map[name].shouldPay += Number(b.splitDetail[name] || 0);
-            }
-          });
-        }
-      });
-    } else {
-      // 非预存活动，实付为账单付款金额
-      bills.forEach(b => {
-        const amount = Number(b.amount || 0);
-        if (b.payer && map[b.payer]) {
-          map[b.payer].paid += amount;
-        }
-      });
-      
-      // 统计应付（所有活动都按账单分摊计算）
-      bills.forEach(b => {
-        if (b.splitDetail) {
-          Object.keys(b.splitDetail).forEach(name => {
-            if (!map[name]) return;
-            // 只有权重大于0的成员才计算应付
-            if (b.participants && b.participants[name] > 0) {
-              map[name].shouldPay += Number(b.splitDetail[name] || 0);
-            }
-          });
-        }
-      });
-    }
-    
-    // 余额：实付 - 应付
-    Object.keys(map).forEach(name => {
-      const v = map[name];
-      v.balance = v.paid - v.shouldPay;
-    });
-    
-    return map;
+    return settlement.calcBalances(members, bills, recharges, keeper);
   },
   
   // 点击成员，展示该成员应付和实付账单列表
   onMemberTap(e) {
     const memberName = e.currentTarget.dataset.name;
     if (!memberName) return;
+    this.showMemberBillsForName(memberName);
+  },
+
+  showMemberBillsForName(memberName) {
     const rawBills = this.data.rawBills || [];
     const isPrepaid = this.data.isPrepaid || false;
     const keeper = this.data.keeper || '';
@@ -849,13 +772,15 @@ Page({
       memberBills = rawRecharges
         .filter(r => r.keeper === keeper)
         .map(r => {
+          const totalAmount = this.formatAmount(r.amount || 0);
           return {
             _id: r._id,
             creator: r.creator,
             title: '充值',
             payer: r.payer || '未知', // 预存人（充值的人）
-            totalAmount: this.formatAmount(r.amount || 0),
-            userAmount: this.formatAmount(r.amount || 0), // 保管人收到的金额
+            totalAmount: totalAmount,
+            userAmount: totalAmount, // 保管人收到的金额
+            displayTitle: `充值 ${totalAmount}￥`,
             date: this.formatRechargeDate(r),
             paid: true, // 充值记录视为已付
             isRecharge: true // 标记为充值记录
@@ -869,14 +794,16 @@ Page({
           // 预存模式下，如果有 billshow 字段，使用它来显示付款人（用于保持账务平衡显示）
           const displayPayer = (b.billshow || b.payer) || '未知';
           const userName = db.getCurrentUser();
+          const totalAmount = this.formatAmount(b.amount || 0);
           return {
             _id: b._id,
             creator: b.creator,
             isCreator: b.creator === userName, // 是否是账单创建者
             title: b.title || '未命名',
             payer: displayPayer, // 使用 billshow 或 payer 来显示
-            totalAmount: this.formatAmount(b.amount || 0),
+            totalAmount: totalAmount,
             userAmount: this.formatAmount(b.splitDetail[memberName] || 0),
+            displayTitle: `${b.title || '未命名'} ${totalAmount}￥`,
             date: this.formatBillDate(b),
             paid: displayPayer === memberName, // 付款人为本人视为已付（使用显示付款人）
           };
@@ -893,12 +820,14 @@ Page({
       const rechargeBills = rawRecharges
         .filter(r => r.payer === memberName)
         .map(r => {
+          const totalAmount = this.formatAmount(r.amount || 0);
           return {
             _id: r._id,
             creator: r.creator,
             title: '充值',
             payee: keeper || '保管人', // 收款人是保管人
-            totalAmount: this.formatAmount(r.amount || 0),
+            totalAmount: totalAmount,
+            displayTitle: `充值 ${totalAmount}￥`,
             date: this.formatRechargeDate(r),
             isRecharge: true // 标记为充值记录
           };
@@ -920,20 +849,22 @@ Page({
           return displayPayer === memberName;
         })
         .map(b => {
-          // 计算收款人（所有参与人中，除了付款人自己）
-          const participants = b.participants ? Object.keys(b.participants).filter(name => 
-            name !== memberName && b.participants[name] > 0
+          // 计算收款人（所有参与人，付款人如果参与也要显示）
+          const participants = b.participants ? Object.keys(b.participants).filter(name =>
+            b.participants[name] > 0
           ) : [];
           const payee = participants.length > 0 ? participants.join('、') : '无';
           const userName = db.getCurrentUser();
           
+          const totalAmount = this.formatAmount(b.amount || 0);
           return {
             _id: b._id,
             creator: b.creator,
             isCreator: b.creator === userName, // 是否是账单创建者
             title: b.title || '未命名',
             payee: payee,
-            totalAmount: this.formatAmount(b.amount || 0),
+            totalAmount: totalAmount,
+            displayTitle: `${b.title || '未命名'} ${totalAmount}￥`,
             date: this.formatBillDate(b),
           };
         });
@@ -949,81 +880,44 @@ Page({
           return displayPayer === memberName;
         })
         .map(b => {
-          // 计算收款人（所有参与人中，除了付款人自己）
-          const participants = b.participants ? Object.keys(b.participants).filter(name => 
-            name !== memberName && b.participants[name] > 0
+          // 计算收款人（所有参与人，付款人如果参与也要显示）
+          const participants = b.participants ? Object.keys(b.participants).filter(name =>
+            b.participants[name] > 0
           ) : [];
           const payee = participants.length > 0 ? participants.join('、') : '无';
           const userName = db.getCurrentUser();
           
+          const totalAmount = this.formatAmount(b.amount || 0);
           return {
             _id: b._id,
             creator: b.creator,
             isCreator: b.creator === userName, // 是否是账单创建者
             title: b.title || '未命名',
             payee: payee,
-            totalAmount: this.formatAmount(b.amount || 0),
+            totalAmount: totalAmount,
+            displayTitle: `${b.title || '未命名'} ${totalAmount}￥`,
             date: this.formatBillDate(b),
           };
         });
     }
 
     
-    // 计算收入总额
-    let incomeTotal = 0;
-    if (isPrepaid && memberName === keeper) {
-      // 预存模式下，保管人的收入 = 收到的充值金额
-      rawRecharges.forEach(r => {
-        const amount = Number(r.amount || 0);
-        if (r.keeper === keeper) {
-          incomeTotal += amount;
-        }
-      });
-    } else {
-      // 非预存模式或非保管人，收入 = 用户应付金额的总和
-      incomeTotal = memberBills.reduce((sum, bill) => {
-        // 解析格式化后的金额字符串
-        const amount = Number(bill.userAmount || 0);
-        return sum + amount;
-      }, 0);
-    }
-    
-    // 计算支出总额
-    let expenseTotal = 0;
-    if (isPrepaid && memberName === keeper) {
-      // 预存模式下，保管人的支出 = 支付的账单总金额
-      expenseTotal = memberPaidBills.reduce((sum, bill) => {
-        // 解析格式化后的金额字符串
-        const amount = Number(bill.totalAmount || 0);
-        return sum + amount;
-      }, 0);
-    } else if (isPrepaid) {
-      // 预存模式下，预存人的支出 = 充值金额
-      rawRecharges.forEach(r => {
-        const amount = Number(r.amount || 0);
-        if (r.payer === memberName) {
-          expenseTotal += amount;
-        }
-      });
-    } else {
-      // 非预存模式，支出 = 用户付款的账单总金额
-      expenseTotal = memberPaidBills.reduce((sum, bill) => {
-        // 解析格式化后的金额字符串
-        const amount = Number(bill.totalAmount || 0);
-        return sum + amount;
-      }, 0);
-    }
-    
-    // 计算余额（支出 - 收入）
-    const balance = expenseTotal - incomeTotal;
+    const totals = settlement.computeMemberTotals({
+      memberName,
+      isPrepaid,
+      keeper,
+      rawRecharges,
+      memberBills,
+      memberPaidBills
+    });
 
     this.setData({
       selectedMemberBills: memberBills,
       selectedMemberPaidBills: memberPaidBills,
       selectedMemberName: memberName,
-      selectedMemberIncome: this.formatAmount(incomeTotal), // 收入总额
-      selectedMemberExpense: this.formatAmount(expenseTotal), // 支出总额
-      selectedMemberBalance: this.formatAmount(balance), // 余额
+      selectedMemberIncome: this.formatAmount(totals.incomeTotal), // 收入总额
+      selectedMemberExpense: this.formatAmount(totals.expenseTotal), // 支出总额
+      selectedMemberBalance: this.formatAmount(totals.balance), // 余额
       showMemberBills: true,
     });
   },
@@ -1162,32 +1056,28 @@ Page({
         if (res.confirm) {
           wx.showLoading({ title: '删除中...' });
           try {
-            const dbCloud = wx.cloud.database();
-            
-            // 如果是预存模式，先检查账单是否有关联的充值记录
-            if (this.data.isPrepaid) {
-              try {
-                const billDoc = await dbCloud.collection('bills').doc(billId).get();
-                const bill = billDoc.data;
-                
-                // 如果账单有关联的充值记录ID，删除对应的充值记录
-                if (bill && bill.relatedRechargeId) {
-                  try {
-                    await dbCloud.collection('recharges').doc(bill.relatedRechargeId).remove();
-                    console.log('已同步删除关联的充值记录:', bill.relatedRechargeId);
-                  } catch (rechargeErr) {
-                    console.error('删除关联充值记录失败:', rechargeErr);
-                    // 继续删除账单，不因为充值记录删除失败而阻止
-                  }
-                }
-              } catch (billErr) {
-                console.error('获取账单信息失败:', billErr);
-                // 继续删除账单
-              }
+            const userName = db.getCurrentUser();
+            const passwordHash = db.getCurrentUserPasswordHash();
+            if (!userName || !passwordHash) {
+              wx.hideLoading();
+              wx.showToast({
+                title: '请先登录',
+                icon: 'none'
+              });
+              return;
             }
-            
-            // 删除账单
-            const result = await db.deleteBill(billId);
+
+            const res = await wx.cloud.callFunction({
+              name: 'billOps',
+              data: {
+                action: 'deleteBill',
+                billId,
+                userName,
+                passwordHash
+              }
+            });
+
+            const result = (res && res.result) ? res.result : {};
             if (result.success) {
               wx.hideLoading();
               wx.showToast({
@@ -1195,15 +1085,37 @@ Page({
                 icon: 'success'
               });
               this.loadActivityData();
-            } else {
-              throw new Error(result.error);
+              return;
             }
+
+            wx.hideLoading();
+            console.error('删除账单失败:', result);
+            let errorMsg = '删除失败';
+            const errMsg = result.errMsg || result.error || '';
+            if (result.errCode === -601034 || (errMsg && (errMsg.includes('权限') || errMsg.toLowerCase().includes('permission')))) {
+              errorMsg = '删除失败：数据库权限不足，请检查bills集合的删除权限设置';
+            } else if (errMsg) {
+              errorMsg = `删除失败：${errMsg}`;
+            }
+            wx.showToast({
+              title: errorMsg,
+              icon: 'none',
+              duration: 3000
+            });
           } catch (e) {
             wx.hideLoading();
             console.error('删除账单失败:', e);
+            const errMsg = (e && (e.errMsg || e.message)) || '';
+            let errorMsg = '删除失败';
+            if (e && (e.errCode === -601034 || (errMsg && (errMsg.includes('权限') || errMsg.toLowerCase().includes('permission'))))) {
+              errorMsg = '删除失败：数据库权限不足，请检查bills集合的删除权限设置';
+            } else if (errMsg) {
+              errorMsg = `删除失败：${errMsg}`;
+            }
             wx.showToast({
-              title: '删除失败',
-              icon: 'none'
+              title: errorMsg,
+              icon: 'none',
+              duration: 3000
             });
           }
         }
@@ -2131,20 +2043,24 @@ Page({
     if (isPrepaid && memberName === keeper) {
       incomeBills = rawRecharges
         .filter(r => r.keeper === keeper)
-        .map(r => ({
-          title: '充值',
-          payer: r.payer || '未知',
-          amount: this.formatAmount(r.amount || 0),
-          date: this.formatRechargeDate(r),
-          isRecharge: true
-        }));
+        .map(r => {
+          const totalAmount = this.formatAmount(r.amount || 0);
+          return {
+            title: `充值 ${totalAmount}￥`,
+            payer: r.payer || '未知',
+            amount: totalAmount,
+            date: this.formatRechargeDate(r),
+            isRecharge: true
+          };
+        });
     } else {
       incomeBills = rawBills
         .filter(b => b && b.splitDetail && b.participants && b.participants[memberName] !== undefined && b.participants[memberName] > 0 && b.splitDetail[memberName] !== undefined)
         .map(b => {
           const displayPayer = (b.billshow || b.payer) || '未知';
+          const totalAmount = this.formatAmount(b.amount || 0);
           return {
-            title: b.title || '未命名',
+            title: `${b.title || '未命名'} ${totalAmount}￥`,
             payer: displayPayer,
             amount: this.formatAmount(b.splitDetail[memberName] || 0),
             date: this.formatBillDate(b),
@@ -2156,13 +2072,16 @@ Page({
     if (isPrepaid && memberName !== keeper) {
       const rechargeBills = rawRecharges
         .filter(r => r.payer === memberName)
-        .map(r => ({
-          title: '充值',
+        .map(r => {
+          const totalAmount = this.formatAmount(r.amount || 0);
+          return {
+          title: `充值 ${totalAmount}￥`,
           payee: r.keeper || keeper || '未知',
-          amount: this.formatAmount(r.amount || 0),
+          amount: totalAmount,
           date: this.formatRechargeDate(r),
           isRecharge: true
-        }));
+          };
+        });
       expenseBills = expenseBills.concat(rechargeBills);
     }
     
@@ -2183,10 +2102,11 @@ Page({
             }
           });
         }
+        const totalAmount = this.formatAmount(b.amount || 0);
         return {
-          title: b.title || '未命名',
+          title: `${b.title || '未命名'} ${totalAmount}￥`,
           payee: payeeList.length > 0 ? payeeList.join('、') : '未知',
-          amount: this.formatAmount(b.amount || 0),
+          amount: totalAmount,
           date: this.formatBillDate(b),
           isRecharge: false
         };
@@ -2248,7 +2168,37 @@ Page({
         if (res.confirm) {
           wx.showLoading({ title: '删除中...' });
           try {
-            await db.deleteActivity(this.data.activityId);
+            const userName = db.getCurrentUser();
+            const passwordHash = db.getCurrentUserPasswordHash();
+            if (!userName || !passwordHash) {
+              wx.hideLoading();
+              wx.showToast({
+                title: '请先登录',
+                icon: 'none'
+              });
+              return;
+            }
+
+            const res = await wx.cloud.callFunction({
+              name: 'activityOps',
+              data: {
+                action: 'deleteActivity',
+                activityId: this.data.activityId,
+                userName,
+                passwordHash
+              }
+            });
+
+            const result = (res && res.result) ? res.result : {};
+            if (!result.success) {
+              wx.hideLoading();
+              wx.showToast({
+                title: result.error || '删除失败',
+                icon: 'none',
+                duration: 3000
+              });
+              return;
+            }
             wx.hideLoading();
             wx.showToast({
               title: '删除成功',

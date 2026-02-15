@@ -521,32 +521,28 @@ Page({
         if (res.confirm) {
           wx.showLoading({ title: '删除中...' });
           try {
-            const dbCloud = wx.cloud.database();
-            
-            // 如果是预存模式，先检查账单是否有关联的充值记录
-            if (this.data.isPrepaid) {
-              try {
-                const billDoc = await dbCloud.collection('bills').doc(this.data.billId).get();
-                const bill = billDoc.data;
-                
-                // 如果账单有关联的充值记录ID，删除对应的充值记录
-                if (bill && bill.relatedRechargeId) {
-                  try {
-                    await dbCloud.collection('recharges').doc(bill.relatedRechargeId).remove();
-                    console.log('已同步删除关联的充值记录:', bill.relatedRechargeId);
-                  } catch (rechargeErr) {
-                    console.error('删除关联充值记录失败:', rechargeErr);
-                    // 继续删除账单，不因为充值记录删除失败而阻止
-                  }
-                }
-              } catch (billErr) {
-                console.error('获取账单信息失败:', billErr);
-                // 继续删除账单
-              }
+            const userName = db.getCurrentUser();
+            const passwordHash = db.getCurrentUserPasswordHash();
+            if (!userName || !passwordHash) {
+              wx.hideLoading();
+              wx.showToast({
+                title: '请先登录',
+                icon: 'none'
+              });
+              return;
             }
-            
-            // 删除账单
-            const result = await db.deleteBill(this.data.billId);
+
+            const res = await wx.cloud.callFunction({
+              name: 'billOps',
+              data: {
+                action: 'deleteBill',
+                billId: this.data.billId,
+                userName,
+                passwordHash
+              }
+            });
+
+            const result = (res && res.result) ? res.result : {};
             if (result.success) {
               wx.hideLoading();
               wx.showToast({
@@ -557,15 +553,37 @@ Page({
               setTimeout(() => {
                 wx.navigateBack();
               }, 1500);
-            } else {
-              throw new Error(result.error);
+              return;
             }
+
+            wx.hideLoading();
+            console.error('删除账单失败:', result);
+            let errorMsg = '删除失败';
+            const errMsg = result.errMsg || result.error || '';
+            if (result.errCode === -601034 || (errMsg && (errMsg.includes('权限') || errMsg.toLowerCase().includes('permission')))) {
+              errorMsg = '删除失败：数据库权限不足，请检查bills集合的删除权限设置';
+            } else if (errMsg) {
+              errorMsg = `删除失败：${errMsg}`;
+            }
+            wx.showToast({
+              title: errorMsg,
+              icon: 'none',
+              duration: 3000
+            });
           } catch (e) {
             wx.hideLoading();
             console.error('删除账单失败:', e);
+            const errMsg = (e && (e.errMsg || e.message)) || '';
+            let errorMsg = '删除失败';
+            if (e && (e.errCode === -601034 || (errMsg && (errMsg.includes('权限') || errMsg.toLowerCase().includes('permission'))))) {
+              errorMsg = '删除失败：数据库权限不足，请检查bills集合的删除权限设置';
+            } else if (errMsg) {
+              errorMsg = `删除失败：${errMsg}`;
+            }
             wx.showToast({
-              title: '删除失败：' + (e.message || '未知错误'),
-              icon: 'none'
+              title: errorMsg,
+              icon: 'none',
+              duration: 3000
             });
           }
         }
@@ -897,147 +915,91 @@ Page({
           updatedAt: new Date(),
         };
         
-        // 使用 set 方法完全替换文档，确保清除所有旧字段（包括旧成员的participants和splitDetail）
-        // 注意：relatedRechargeId 会在后续逻辑中更新，这里先不设置
-        // 如果付款人改为保管人，需要清除 relatedRechargeId
-        let finalRelatedRechargeId = null;
-        if (needCreateRecharge) {
-          // 如果需要创建预存记录，先保留原有的ID，后续会更新
-          finalRelatedRechargeId = existingRelatedRechargeId;
-        } else if (existingRelatedRechargeId) {
-          // 如果付款人改为保管人，清除关联记录ID（预存记录会在后续逻辑中删除）
-          finalRelatedRechargeId = null;
-        }
-        
-        await dbCloud.collection('bills').doc(this.data.billId).set({
-          data: {
-            ...cleanBillData,
-            payer: payer, // 使用修改后的付款人（如果是预存模式且付款人不是保管人，已修改为保管人）
-            isPayerAutoModified: needCreateRecharge || false, // 标记付款人是否被自动修改
-            originalPayer: needCreateRecharge ? originalPayer : null, // 保存原始付款人（如果被自动修改）
-            billshow: billshow || null, // 用于显示的付款人（预存模式下，如果付款人被修改为保管人，保存原始付款人）
-            relatedRechargeId: finalRelatedRechargeId, // 根据情况设置或清除关联记录ID
-          }
-        });
-        
-        // 处理预存记录：更新现有记录或创建新记录
-        let relatedRechargeId = null;
-        if (this.data.isPrepaid && this.data.keeper) {
-          if (needCreateRecharge && originalPayer) {
-            // 需要创建或更新预存记录
-            const dateStr = this.data.date; // 格式：yyyy-MM-dd
-            const date = new Date(`${dateStr}T00:00:00`);
-            
-            if (existingRelatedRechargeId) {
-              // 如果已有关联的预存记录，更新它而不是创建新的
-              try {
-                await dbCloud.collection('recharges').doc(existingRelatedRechargeId).update({
-                  data: {
-                    amount: amount,
-                    payer: originalPayer, // 更新为新的付款人（充值人）
-                    date: date,
-                    updatedAt: new Date()
-                  }
-                });
-                relatedRechargeId = existingRelatedRechargeId;
-                console.log('已更新关联的预存记录:', existingRelatedRechargeId);
-              } catch (updateErr) {
-                console.error('更新预存记录失败:', updateErr);
-                // 如果更新失败，尝试创建新记录
-                const rechargeResult = await dbCloud.collection('recharges').add({
-                  data: {
-                    activityId: this.data.activityId,
-                    amount: amount,
-                    payer: originalPayer,
-                    keeper: this.data.keeper,
-                    recorder: userName,
-                    date: date,
-                    creator: userName,
-                    createdAt: new Date(),
-                    isAuto: true
-                  }
-                });
-                relatedRechargeId = rechargeResult._id;
-              }
-            } else {
-              // 如果没有关联记录，创建新的
-              const rechargeResult = await dbCloud.collection('recharges').add({
-                data: {
-                  activityId: this.data.activityId,
-                  amount: amount,
-                  payer: originalPayer, // 原付款人（充值人）
-                  keeper: this.data.keeper, // 保管人员（收款人）
-                  recorder: userName, // 记录人（当前用户）
-                  date: date,
-                  creator: userName,
-                  createdAt: new Date(),
-                  isAuto: true // 标记为自动生成的充值记录
-                }
-              });
-              relatedRechargeId = rechargeResult._id;
-            }
-            
-            // 更新账单，保存关联的充值记录ID
-            if (relatedRechargeId) {
-              await dbCloud.collection('bills').doc(this.data.billId).update({
-                data: {
-                  relatedRechargeId: relatedRechargeId
-                }
-              });
-            }
-            
-            // 弹出提示对话框
-            wx.hideLoading();
-            wx.showModal({
-              title: '提示',
-              content: existingRelatedRechargeId 
-                ? `预存模式下，付款人不是保管人员，已同步更新预存记录：${originalPayer} 向 ${this.data.keeper} 充值 ¥${amount}`
-                : `预存模式下，付款人不是保管人员，已自动创建充值记录：${originalPayer} 向 ${this.data.keeper} 充值 ¥${amount}`,
-              showCancel: false,
-              confirmText: '确定',
-              success: () => {
-                wx.showToast({
-                  title: '更新成功',
-                  icon: 'success'
-                });
-                // 等待提示显示后返回
-                setTimeout(() => {
-                  wx.navigateBack();
-                }, 1500);
-              }
-            });
-            // 注意：返回操作在对话框的 success 回调中执行，这里不继续执行后续代码
-            return;
-          } else if (existingRelatedRechargeId) {
-            // 如果付款人改为保管人，删除关联的预存记录
-            // 注意：账单中的 relatedRechargeId 已经在上面更新账单时清除了
-            try {
-              await dbCloud.collection('recharges').doc(existingRelatedRechargeId).remove();
-              console.log('已删除关联的预存记录:', existingRelatedRechargeId);
-            } catch (deleteErr) {
-              console.error('删除预存记录失败:', deleteErr);
-              // 即使删除失败，也继续执行，因为账单中的关联已经清除
-            }
-            
-            wx.hideLoading();
-            wx.showToast({
-              title: '更新成功',
-              icon: 'success'
-            });
-          } else {
-            wx.hideLoading();
-            wx.showToast({
-              title: '更新成功',
-              icon: 'success'
-            });
-          }
-        } else {
+        const passwordHash = db.getCurrentUserPasswordHash();
+        if (!passwordHash) {
           wx.hideLoading();
           wx.showToast({
-            title: '更新成功',
-            icon: 'success'
+            title: '请先登录',
+            icon: 'none'
           });
+          return;
         }
+
+        const updateRes = await wx.cloud.callFunction({
+          name: 'billOps',
+          data: {
+            action: 'updateBill',
+            billId: this.data.billId,
+            userName,
+            passwordHash,
+            billData: {
+              activityId: cleanBillData.activityId,
+              amount: cleanBillData.amount,
+              title: cleanBillData.title,
+              billType: cleanBillData.billType,
+              payer: payer,
+              participants: cleanBillData.participants,
+              splitDetail: cleanBillData.splitDetail,
+              time: cleanBillData.time,
+              remark: cleanBillData.remark
+            },
+            flags: {
+              needCreateRecharge,
+              originalPayer,
+              billshow,
+              existingRelatedRechargeId,
+              isPrepaid: this.data.isPrepaid,
+              keeper: this.data.keeper
+            },
+            dateStr: this.data.date
+          }
+        });
+
+        const updateResult = (updateRes && updateRes.result) ? updateRes.result : {};
+        if (!updateResult.success) {
+          wx.hideLoading();
+          console.error('更新账单失败:', updateResult);
+          let errorMsg = '更新失败';
+          const errMsg = updateResult.errMsg || updateResult.error || '';
+          if (updateResult.errCode === -601034 || (errMsg && (errMsg.includes('权限') || errMsg.toLowerCase().includes('permission')))) {
+            errorMsg = '更新失败：数据库权限不足，请检查bills集合的删除/更新权限设置';
+          } else if (errMsg) {
+            errorMsg = `更新失败：${errMsg}`;
+          }
+          wx.showToast({
+            title: errorMsg,
+            icon: 'none',
+            duration: 3000
+          });
+          return;
+        }
+
+        // 预存模式下，若产生了充值记录变更，弹窗提示
+        if (updateResult.rechargeMessage) {
+          wx.hideLoading();
+          wx.showModal({
+            title: '提示',
+            content: updateResult.rechargeMessage,
+            showCancel: false,
+            confirmText: '确定',
+            success: () => {
+              wx.showToast({
+                title: '更新成功',
+                icon: 'success'
+              });
+              setTimeout(() => {
+                wx.navigateBack();
+              }, 1500);
+            }
+          });
+          return;
+        }
+
+        wx.hideLoading();
+        wx.showToast({
+          title: '更新成功',
+          icon: 'success'
+        });
         
         // 验证更新后的数据
         const updatedBill = await dbCloud.collection('bills').doc(this.data.billId).get();

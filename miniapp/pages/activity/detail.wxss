@@ -766,6 +766,13 @@
   white-space: nowrap;
 }
 
+.bill-table-row .col-name {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: initial;
+  word-break: break-all;
+}
+
 .bill-table-header .col-payer,
 .bill-table-row .col-payer {
   flex: 1.5;
@@ -1184,4 +1191,3 @@
 .status-dot.yellow {
   background-color: #ffc107;
 }
-

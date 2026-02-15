@@ -200,7 +200,7 @@
                 <text class="col-date">日期</text>
               </view>
               <view wx:for="{{selectedMemberBills}}" wx:key="index" class="bill-table-row" bindtap="openBillFromModal" data-id="{{item._id}}" data-is-recharge="{{item.isRecharge ? 'true' : 'false'}}">
-                <text class="col-name">{{item.title}}</text>
+                <text class="col-name">{{item.displayTitle || item.title}}</text>
                 <text class="col-payer">{{item.payer}}</text>
                 <text class="col-user">¥{{item.userAmount}}</text>
                 <text class="col-date">{{item.date}}</text>
@@ -220,7 +220,7 @@
                 <text class="col-date">日期</text>
               </view>
               <view wx:for="{{selectedMemberPaidBills}}" wx:key="index" class="bill-table-row" bindtap="openBillFromModal" data-id="{{item._id}}" data-is-recharge="{{item.isRecharge ? 'true' : 'false'}}">
-                <text class="col-name {{item.isCreator ? 'creator-bill-title' : ''}}">{{item.title}}</text>
+                <text class="col-name {{item.isCreator ? 'creator-bill-title' : ''}}">{{item.displayTitle || item.title}}</text>
                 <text class="col-payee">{{item.payee}}</text>
                 <text class="col-total">¥{{item.totalAmount}}</text>
                 <text class="col-date">{{item.date}}</text>

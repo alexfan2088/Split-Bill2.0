@@ -63,6 +63,11 @@ function getCurrentUser() {
   return wx.getStorageSync('aa_user_name') || '';
 }
 
+// 获取当前用户密码哈希（用于跨设备鉴权）
+function getCurrentUserPasswordHash() {
+  return wx.getStorageSync('aa_user_password') || '';
+}
+
 // 用户登录（验证密码）
 async function login(userName, password) {
   try {
@@ -298,11 +303,7 @@ async function deleteBill(billId) {
     return { success: true };
   } catch (e) {
     console.error('删除账单失败:', e);
-    wx.showToast({
-      title: '删除失败',
-      icon: 'none'
-    });
-    return { success: false, error: e.message };
+    return { success: false, error: e.message, errCode: e.errCode, errMsg: e.errMsg };
   }
 }
 
@@ -432,6 +433,7 @@ async function deleteRecharge(rechargeId) {
 
 module.exports = {
   getCurrentUser,
+  getCurrentUserPasswordHash,
   hashPassword,
   login,
   register,
