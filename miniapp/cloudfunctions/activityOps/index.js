@@ -242,24 +242,31 @@ async function hasMemberRecords(activityId, memberName) {
   const bills = await fetchAll(db.collection('bills'), { activityId });
 
   for (const b of bills) {
-    if (b.payer === memberName) return true;
-    if ((b.recorder || b.creator) === memberName) return true;
-    if (b.billshow === memberName) return true;
-    if (b.originalPayer === memberName) return true;
-    if (b.participants && Object.prototype.hasOwnProperty.call(b.participants, memberName) && (b.participants[memberName] || 0) > 0) {
+    const amount = Number(b.amount || 0);
+    const splitValue = b.splitDetail && Object.prototype.hasOwnProperty.call(b.splitDetail, memberName)
+      ? Number(b.splitDetail[memberName] || 0)
+      : 0;
+    const participantWeight = b.participants && Object.prototype.hasOwnProperty.call(b.participants, memberName)
+      ? Number(b.participants[memberName] || 0)
+      : 0;
+
+    if (amount > 0 && (b.payer === memberName || b.billshow === memberName || b.originalPayer === memberName)) {
       return true;
     }
-    if (b.splitDetail && Object.prototype.hasOwnProperty.call(b.splitDetail, memberName)) {
+    if (participantWeight > 0) {
+      return true;
+    }
+    if (splitValue > 0) {
       return true;
     }
   }
 
   const recharges = await fetchAll(db.collection('recharges'), { activityId });
   for (const r of recharges) {
-    if (r.payer === memberName) return true;
-    if ((r.recorder || r.creator) === memberName) return true;
-    if (r.creator === memberName) return true;
-    if (r.keeper === memberName) return true;
+    const amount = Number(r.amount || 0);
+    if (amount > 0 && (r.payer === memberName || r.keeper === memberName)) {
+      return true;
+    }
   }
 
   return false;

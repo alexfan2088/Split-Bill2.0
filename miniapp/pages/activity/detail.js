@@ -34,6 +34,8 @@ Page({
     pdfCanvasWidth: 750,
     pdfCanvasHeight: 1200,
     pdfReminderShown: false,
+    showPdfReminderModal: false,
+    pdfReminderDiffDays: 0,
     showPdfGuideModal: false,
     pdfGuideText: ''
   },
@@ -1260,22 +1262,28 @@ Page({
     const userName = db.getCurrentUser();
     if (!userName || !activity) return;
 
-    const lastDownloadAt = this.getLastPdfDownloadAt(activity);
+    if (this.getPdfReminderNever()) return;
+    const nextRemindAt = this.getPdfReminderNextAt();
+    if (nextRemindAt && Date.now() < nextRemindAt) return;
+
+    const lastDownloadAt = this.getLastPdfDownloadAt();
     if (!lastDownloadAt) return;
+
+    const latestChangeAt = this.getLatestActivityChangeAt(
+      activity,
+      this.data.rawBills || [],
+      this.data.rawRecharges || []
+    );
+    if (!latestChangeAt || latestChangeAt <= lastDownloadAt) return;
 
     const now = Date.now();
     const diffDays = Math.floor((now - lastDownloadAt) / (24 * 60 * 60 * 1000));
-    if (diffDays < 7) return;
+    if (diffDays < 30) return;
 
-    this.setData({ pdfReminderShown: true });
-    wx.showModal({
-      title: '下载提醒',
-      content: `已${diffDays}天未下载活动信息，是否现在下载？`,
-      success: (res) => {
-        if (res.confirm) {
-          this.downloadActivityPdf();
-        }
-      }
+    this.setData({
+      pdfReminderShown: true,
+      showPdfReminderModal: true,
+      pdfReminderDiffDays: diffDays
     });
   },
 
@@ -1284,21 +1292,88 @@ Page({
     return `aa_activity_pdf_last_download_${userName}_${this.data.activityId}`;
   },
 
-  getLastPdfDownloadAt(activity) {
+  getLastPdfDownloadAt() {
     const key = this.getPdfDownloadKey();
     const stored = wx.getStorageSync(key);
-    if (stored) return stored;
-
-    const activityDate = activity.updatedAt || activity.createdAt;
-    if (!activityDate) return 0;
-    const date = activityDate.getTime ? activityDate : new Date(activityDate);
-    const time = date.getTime();
-    return Number.isNaN(time) ? 0 : time;
+    return stored || 0;
   },
 
   setLastPdfDownloadAt(timestamp) {
     const key = this.getPdfDownloadKey();
     wx.setStorageSync(key, timestamp);
+  },
+
+  getPdfReminderNeverKey() {
+    const userName = db.getCurrentUser() || 'guest';
+    return `aa_activity_pdf_never_remind_${userName}_${this.data.activityId}`;
+  },
+
+  getPdfReminderNextAtKey() {
+    const userName = db.getCurrentUser() || 'guest';
+    return `aa_activity_pdf_next_remind_${userName}_${this.data.activityId}`;
+  },
+
+  getPdfReminderNever() {
+    const key = this.getPdfReminderNeverKey();
+    return Boolean(wx.getStorageSync(key));
+  },
+
+  setPdfReminderNever(value) {
+    const key = this.getPdfReminderNeverKey();
+    wx.setStorageSync(key, value ? 1 : 0);
+  },
+
+  getPdfReminderNextAt() {
+    const key = this.getPdfReminderNextAtKey();
+    return Number(wx.getStorageSync(key) || 0);
+  },
+
+  setPdfReminderNextAt(timestamp) {
+    const key = this.getPdfReminderNextAtKey();
+    wx.setStorageSync(key, timestamp || 0);
+  },
+
+  getLatestActivityChangeAt(activity, bills, recharges) {
+    let latest = 0;
+    const activityDate = activity && (activity.updatedAt || activity.createdAt);
+    if (activityDate) {
+      const time = activityDate.getTime ? activityDate.getTime() : new Date(activityDate).getTime();
+      if (!Number.isNaN(time)) latest = Math.max(latest, time);
+    }
+
+    (bills || []).forEach((bill) => {
+      const dateVal = bill.updatedAt || bill.createdAt || bill.time;
+      if (!dateVal) return;
+      const time = dateVal.getTime ? dateVal.getTime() : new Date(dateVal).getTime();
+      if (!Number.isNaN(time)) latest = Math.max(latest, time);
+    });
+
+    (recharges || []).forEach((recharge) => {
+      const dateVal = recharge.updatedAt || recharge.createdAt || recharge.time;
+      if (!dateVal) return;
+      const time = dateVal.getTime ? dateVal.getTime() : new Date(dateVal).getTime();
+      if (!Number.isNaN(time)) latest = Math.max(latest, time);
+    });
+
+    return latest;
+  },
+
+  onPdfReminderNever() {
+    this.setPdfReminderNever(true);
+    this.setPdfReminderNextAt(0);
+    this.setData({ showPdfReminderModal: false });
+  },
+
+  onPdfReminderLater() {
+    const nextAt = Date.now() + 30 * 24 * 60 * 60 * 1000;
+    this.setPdfReminderNextAt(nextAt);
+    this.setData({ showPdfReminderModal: false });
+  },
+
+  onPdfReminderDownload() {
+    this.setPdfReminderNextAt(0);
+    this.setData({ showPdfReminderModal: false });
+    this.downloadActivityPdf();
   },
 
   formatYymmdd(dateObj) {
@@ -1497,6 +1572,7 @@ Page({
       }
 
       this.setLastPdfDownloadAt(Date.now());
+      this.setPdfReminderNextAt(0);
       this.setData({ pdfReminderShown: true });
 
       progressDone += 1;

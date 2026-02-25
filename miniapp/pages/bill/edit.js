@@ -18,6 +18,10 @@ Page({
     payerList: [],
     participants: [],
     remark: '',
+    attachmentItems: [],
+    remarkMaxLen: 200,
+    attachmentCanvasWidth: 10,
+    attachmentCanvasHeight: 10,
     isPrepaid: false, // 是否预存活动
     keeper: '', // 保管人员
     payerDisabled: false, // 付款人是否禁用
@@ -226,6 +230,7 @@ Page({
     this.setData({
       date: `${year}-${month}-${day}`,
       time: `${hours}:${minutes}`,
+      attachmentItems: [],
     });
     
     // 加载活动成员并继承最近一次账单的权重
@@ -414,6 +419,7 @@ Page({
         }
       }
       
+      const remarkText = bill.remark || '';
       this.setData({
         amount: String(bill.amount || ''),
         title: bill.title || '',
@@ -422,11 +428,13 @@ Page({
         time: `${hours}:${minutes}`,
         payerIndex: payerIndex,
         participants: participants,
-        remark: bill.remark || '',
+        remark: remarkText,
         isPrepaid: isPrepaid,
         keeper: keeper,
         payerDisabled: payerDisabled,
       });
+
+      await this.loadBillAttachments(bill.attachments || []);
       
     } catch (e) {
       console.error('加载账单数据失败:', e);
@@ -731,6 +739,249 @@ Page({
   onRemarkInput(e) {
     this.setData({ remark: e.detail.value });
   },
+
+  onAddAttachment() {
+    if (this.data.isReadOnly) return;
+    const maxCount = 1;
+    const currentCount = (this.data.attachmentItems || []).length;
+    if (currentCount >= maxCount) {
+      wx.showToast({ title: '最多添加1张图片', icon: 'none' });
+      return;
+    }
+    wx.chooseImage({
+      count: maxCount - currentCount,
+      sizeType: ['compressed'],
+      sourceType: ['album', 'camera'],
+      success: async (res) => {
+        const tempFiles = res && res.tempFiles ? res.tempFiles : [];
+        if (!tempFiles.length) return;
+        const newItems = await this.processSelectedImages(tempFiles);
+        if (!newItems.length) return;
+        const merged = (this.data.attachmentItems || []).concat(newItems).slice(0, maxCount);
+        this.setData({ attachmentItems: merged });
+      }
+    });
+  },
+
+  onPreviewAttachment(e) {
+    const index = Number(e.currentTarget.dataset.index || 0);
+    const items = (this.data.attachmentItems || []).filter(i => i.previewUrl);
+    if (!items.length) return;
+    const urls = items.map(i => i.previewUrl);
+    const current = urls[index] || urls[0];
+    wx.previewImage({ urls, current });
+  },
+
+  onRemoveAttachment(e) {
+    if (this.data.isReadOnly) return;
+    const index = Number(e.currentTarget.dataset.index || 0);
+    const items = (this.data.attachmentItems || []).slice();
+    if (index < 0 || index >= items.length) return;
+    items.splice(index, 1);
+    this.setData({ attachmentItems: items });
+  },
+
+  normalizeAttachments(raw) {
+    const list = Array.isArray(raw) ? raw : [];
+    const fileIDs = [];
+    list.forEach((item) => {
+      if (!item) return;
+      if (typeof item === 'string') {
+        fileIDs.push(item);
+      } else if (item.fileID) {
+        fileIDs.push(item.fileID);
+      }
+    });
+    return fileIDs;
+  },
+
+  async processSelectedImages(tempFiles) {
+    const limitBytes = 100 * 1024;
+    const targets = tempFiles.slice(0, 1);
+    if (!targets.length) return [];
+
+    const compressed = await Promise.all(targets.map(async (file) => {
+      const path = file.path;
+      const finalPath = await this.compressImageToLimit(path, limitBytes);
+      return finalPath;
+    }));
+
+    const valid = compressed.filter(p => p);
+    if (!valid.length) {
+      wx.showToast({ title: '图片压缩后仍超过100KB', icon: 'none' });
+      return [];
+    }
+
+    return valid.map(p => ({
+      fileID: '',
+      localPath: p,
+      previewUrl: p,
+      isUploaded: false
+    }));
+  },
+
+  async compressImageToLimit(path, limitBytes) {
+    const fs = wx.getFileSystemManager();
+    const getSize = async (p) => {
+      try {
+        const info = await new Promise((resolve, reject) => {
+          fs.getFileInfo({
+            filePath: p,
+            success: resolve,
+            fail: reject
+          });
+        });
+        return info && info.size ? info.size : 0;
+      } catch (e) {
+        return 0;
+      }
+    };
+
+    const getInfo = async (p) => {
+      try {
+        return await new Promise((resolve, reject) => {
+          wx.getImageInfo({
+            src: p,
+            success: resolve,
+            fail: reject
+          });
+        });
+      } catch (e) {
+        return null;
+      }
+    };
+
+    const canvasToFile = async (p, width, height, quality) => {
+      this.setData({
+        attachmentCanvasWidth: width,
+        attachmentCanvasHeight: height
+      });
+      const ctx = wx.createCanvasContext('attachmentCanvas', this);
+      ctx.drawImage(p, 0, 0, width, height);
+      await new Promise((resolve) => ctx.draw(false, resolve));
+      return await new Promise((resolve, reject) => {
+        wx.canvasToTempFilePath({
+          canvasId: 'attachmentCanvas',
+          width,
+          height,
+          destWidth: width,
+          destHeight: height,
+          fileType: 'jpg',
+          quality,
+          success: (res) => resolve(res.tempFilePath),
+          fail: reject
+        }, this);
+      });
+    };
+
+    let currentPath = path;
+    let size = await getSize(currentPath);
+    if (size && size <= limitBytes) return currentPath;
+
+    const qualities = [0.8, 0.6, 0.4, 0.2];
+    for (const quality of qualities) {
+      try {
+        const res = await wx.compressImage({
+          src: currentPath,
+          quality: Math.round(quality * 100)
+        });
+        if (res && res.tempFilePath) {
+          currentPath = res.tempFilePath;
+          size = await getSize(currentPath);
+          if (size && size <= limitBytes) return currentPath;
+        }
+      } catch (e) {
+        // ignore and continue
+      }
+    }
+
+    const info = await getInfo(path);
+    if (!info || !info.width || !info.height) {
+      return '';
+    }
+
+    const baseWidth = info.width;
+    const baseHeight = info.height;
+    const scaleSteps = [0.85, 0.7, 0.55, 0.4, 0.3, 0.2];
+    for (const scale of scaleSteps) {
+      const width = Math.max(200, Math.floor(baseWidth * scale));
+      const height = Math.max(200, Math.floor(baseHeight * scale));
+      for (const quality of qualities) {
+        try {
+          const tempPath = await canvasToFile(path, width, height, quality);
+          size = await getSize(tempPath);
+          if (size && size <= limitBytes) return tempPath;
+          currentPath = tempPath;
+        } catch (e) {
+          // ignore and continue
+        }
+      }
+    }
+
+    return '';
+  },
+
+  async loadBillAttachments(rawAttachments) {
+    const fileIDs = this.normalizeAttachments(rawAttachments);
+    if (!fileIDs.length) {
+      this.setData({ attachmentItems: [] });
+      return;
+    }
+    try {
+      const res = await wx.cloud.getTempFileURL({ fileList: fileIDs });
+      const fileList = res && res.fileList ? res.fileList : [];
+      const urlMap = {};
+      fileList.forEach((f) => {
+        if (f && f.fileID && f.tempFileURL) {
+          urlMap[f.fileID] = f.tempFileURL;
+        }
+      });
+      const items = fileIDs.map(id => ({
+        fileID: id,
+        localPath: '',
+        previewUrl: urlMap[id] || '',
+        isUploaded: true
+      })).filter(i => i.previewUrl);
+      this.setData({ attachmentItems: items });
+    } catch (e) {
+      console.error('加载附件失败:', e);
+    }
+  },
+
+  getAttachmentExt(path) {
+    const match = (path || '').match(/\.([a-zA-Z0-9]+)$/);
+    if (!match) return 'jpg';
+    return match[1].toLowerCase();
+  },
+
+  async uploadNewAttachments() {
+    const items = this.data.attachmentItems || [];
+    const toUpload = items.filter(i => !i.fileID && i.localPath);
+    if (!toUpload.length) return items;
+    const activityId = this.data.activityId || 'activity';
+    const timestamp = Date.now();
+    const uploads = toUpload.map((item, idx) => {
+      const ext = this.getAttachmentExt(item.localPath);
+      const cloudPath = `bill_attachments/${activityId}_${timestamp}_${Math.floor(Math.random() * 10000)}_${idx}.${ext}`;
+      return wx.cloud.uploadFile({
+        cloudPath,
+        filePath: item.localPath
+      }).then(res => res && res.fileID ? res.fileID : '');
+    });
+    const fileIDs = await Promise.all(uploads);
+    let uploadIndex = 0;
+    const merged = items.map((item) => {
+      if (item.fileID || !item.localPath) return item;
+      const fileID = fileIDs[uploadIndex++] || '';
+      return {
+        ...item,
+        fileID,
+        isUploaded: Boolean(fileID)
+      };
+    }).filter(item => item.fileID || item.previewUrl);
+    this.setData({ attachmentItems: merged });
+    return merged;
+  },
   
   async saveBill() {
     // 验证账单名称长度
@@ -757,6 +1008,17 @@ Page({
     const billType = this.data.billType.trim() || '聚餐';
     let payer = this.data.payerList[this.data.payerIndex].name;
     const remark = this.data.remark.trim();
+
+    if (remark.length > this.data.remarkMaxLen) {
+      wx.showModal({
+        title: '提示',
+        content: `备注不能超过${this.data.remarkMaxLen}个汉字，请修改后重试。`,
+        showCancel: false,
+        confirmText: '确定',
+      });
+      return;
+    }
+
     
     // 预存模式特殊处理：如果付款人不是保管人，需要创建充值记录
     let needCreateRecharge = false;
@@ -863,6 +1125,11 @@ Page({
       console.log('清理后的participants:', cleanParticipants);
       console.log('清理后的splitDetail:', cleanSplitDetail);
       console.log('当前活动成员:', currentMemberNames);
+
+      const attachmentItems = await this.uploadNewAttachments();
+      const attachments = attachmentItems
+        .map(item => item.fileID)
+        .filter(id => id);
       
       const billData = {
         activityId: this.data.activityId,
@@ -874,6 +1141,7 @@ Page({
         splitDetail: cleanSplitDetail, // 使用清理后的splitDetail
         time: time,
         remark,
+        attachments,
       };
       
       if (this.data.isEdit) {
@@ -910,6 +1178,7 @@ Page({
           splitDetail: billData.splitDetail,   // 只包含当前活动成员，完全替换旧对象
           time: billData.time,
           remark: billData.remark,
+          attachments: billData.attachments || [],
           creator: currentBill.creator || userName, // 保留创建者
           createdAt: currentBill.createdAt || new Date(), // 保留创建时间
           updatedAt: new Date(),
@@ -941,7 +1210,8 @@ Page({
               participants: cleanBillData.participants,
               splitDetail: cleanBillData.splitDetail,
               time: cleanBillData.time,
-              remark: cleanBillData.remark
+              remark: cleanBillData.remark,
+              attachments: cleanBillData.attachments
             },
             flags: {
               needCreateRecharge,

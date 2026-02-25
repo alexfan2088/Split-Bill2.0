@@ -233,6 +233,19 @@
       </view>
     </view>
 
+    <!-- PDF 下载提醒弹层 -->
+    <view wx:if="{{showPdfReminderModal}}" class="pdf-modal-mask" catchtouchmove="noop">
+      <view class="pdf-reminder-modal">
+        <view class="pdf-modal-title">下载提醒</view>
+        <view class="pdf-modal-content">已{{pdfReminderDiffDays}}天未下载活动信息，是否现在下载？</view>
+        <view class="pdf-reminder-actions">
+          <button class="pdf-reminder-btn ghost" bindtap="onPdfReminderNever">永不提醒</button>
+          <button class="pdf-reminder-btn ghost" bindtap="onPdfReminderLater">30天后提醒</button>
+          <button class="pdf-reminder-btn primary" bindtap="onPdfReminderDownload">确定下载</button>
+        </view>
+      </view>
+    </view>
+
     <!-- PDF 保存指引弹层 -->
     <view wx:if="{{showPdfGuideModal}}" class="pdf-modal-mask" catchtouchmove="noop">
       <view class="pdf-modal">

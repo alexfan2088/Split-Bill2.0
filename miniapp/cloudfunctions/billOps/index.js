@@ -167,6 +167,7 @@ exports.main = async (event) => {
         splitDetail: billData.splitDetail,
         time: billData.time,
         remark: billData.remark,
+        attachments: billData.attachments || [],
         creator: currentBill.creator || userName,
         createdAt: currentBill.createdAt || new Date(),
         updatedAt: new Date(),

@@ -220,6 +220,39 @@
   border-radius: 8rpx;
 }
 
+.pdf-reminder-modal {
+  width: 660rpx;
+  background-color: #fff;
+  border-radius: 14rpx;
+  padding: 32rpx 28rpx 28rpx;
+  box-sizing: border-box;
+}
+
+.pdf-reminder-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+  margin-top: 28rpx;
+}
+
+.pdf-reminder-btn {
+  width: 100%;
+  padding: 16rpx 20rpx;
+  border-radius: 10rpx;
+  font-size: 26rpx;
+  text-align: center;
+}
+
+.pdf-reminder-btn.ghost {
+  background-color: #f5f7fb;
+  color: #445;
+}
+
+.pdf-reminder-btn.primary {
+  background-color: #0ea5e9;
+  color: #fff;
+}
+
 .tabs {
   display: flex;
   align-items: center;

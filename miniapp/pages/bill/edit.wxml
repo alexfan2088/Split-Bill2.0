@@ -34,12 +34,15 @@
     
     <view class="form-item">
       <text class="label">时间</text>
-      <picker mode="date" value="{{date}}" bindchange="onDateChange" disabled="{{isReadOnly}}">
-        <view class="picker">{{date || '选择日期'}}</view>
-      </picker>
-      <picker mode="time" value="{{time}}" bindchange="onTimeChange" disabled="{{isReadOnly}}">
-        <view class="picker">{{time || '选择时间'}}</view>
-      </picker>
+      <view class="datetime-row">
+        <picker class="picker-wrapper picker-date" mode="date" value="{{date}}" bindchange="onDateChange" disabled="{{isReadOnly}}">
+          <view class="picker picker-inline">{{date || '选择日期'}}</view>
+        </picker>
+        <view class="datetime-spacer"></view>
+        <picker class="picker-wrapper picker-time" mode="time" value="{{time}}" bindchange="onTimeChange" disabled="{{isReadOnly}}">
+          <view class="picker picker-inline">{{time || '选择时间'}}</view>
+        </picker>
+      </view>
     </view>
     
     <view class="form-item">
@@ -71,12 +74,23 @@
     </view>
     
     <view class="form-item">
-      <text class="label">备注</text>
-      <textarea class="textarea" placeholder="可选（最多20个汉字）" value="{{remark}}" bindinput="onRemarkInput" disabled="{{isReadOnly}}" auto-height="{{false}}" maxlength="20" />
+      <view class="form-item-header-inline">
+        <text class="label label-inline">备注</text>
+        <button wx:if="{{!isReadOnly}}" class="btn btn-attachment" bindtap="onAddAttachment">附件</button>
+      </view>
+      <textarea class="textarea" placeholder="可选（最多200个汉字）" value="{{remark}}" bindinput="onRemarkInput" disabled="{{isReadOnly}}" auto-height="{{true}}" maxlength="{{remarkMaxLen}}" />
+      <view wx:if="{{attachmentItems.length > 0}}" class="attachment-list">
+        <view wx:for="{{attachmentItems}}" wx:key="index" class="attachment-item">
+          <image class="attachment-thumb" mode="aspectFill" src="{{item.previewUrl}}" data-index="{{index}}" bindtap="onPreviewAttachment" />
+          <view wx:if="{{!isReadOnly}}" class="attachment-remove" data-index="{{index}}" bindtap="onRemoveAttachment">删除</view>
+        </view>
+      </view>
     </view>
     
     <view wx:if="{{isEdit && isCreator && !isReadOnly}}" class="form-item form-actions-bottom">
       <button class="btn btn-delete" bindtap="deleteBill">删除账单</button>
     </view>
   </view>
+
+  <canvas canvas-id="attachmentCanvas" class="attachment-canvas" style="width: {{attachmentCanvasWidth}}px; height: {{attachmentCanvasHeight}}px;"></canvas>
 </view>
