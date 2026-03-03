@@ -1869,12 +1869,15 @@ Page({
       }
     };
 
+    const currentMemberNames = (activity.members || []).map(m => (typeof m === 'string' ? m : m.name)).filter(Boolean);
+    const currentMemberSet = new Set(currentMemberNames);
+
     const detailMap = {};
     const noIncomeExpenseMembers = [];
     members.forEach((m) => {
       const name = m.name || '';
       if (!name) return;
-      const details = this.buildMemberBillDetails(name, bills, rawRecharges, isPrepaid, keeper);
+      const details = this.buildMemberBillDetails(name, bills, rawRecharges, isPrepaid, keeper, currentMemberSet);
       detailMap[name] = details;
       if (details.incomeBills.length === 0 && details.expenseBills.length === 0) {
         noIncomeExpenseMembers.push(name);
@@ -1885,7 +1888,7 @@ Page({
     addTitle('活动信息');
     const activityName = activity.name || '未命名活动';
     const creator = activity.creator || '';
-    const memberNames = (activity.members || []).map(m => m.name || m).join('、');
+    const memberNames = currentMemberNames.join('、');
     const prepaidInfo = activity.isPrepaid ? `预存活动（保管人：${activity.keeper || '未设置'}）` : '非预存活动';
     const exportTime = this.formatExportTime(new Date());
 
@@ -1923,7 +1926,9 @@ Page({
         const title = bill.title || '未命名';
         const payer = (bill.billshow || bill.payer) || '';
         const participants = bill.participants
-          ? Object.keys(bill.participants).filter(name => bill.participants[name] > 0).join('、')
+          ? Object.keys(bill.participants)
+            .filter(name => bill.participants[name] > 0 && currentMemberSet.has(name))
+            .join('、')
           : '';
         const amount = `¥${this.formatAmount(bill.amount || 0)}`;
         addRow([
@@ -1941,9 +1946,9 @@ Page({
     // 结算信息
     addTitle('结算信息');
     addText(`总支出：¥${this.data.total}，人均：¥${this.data.avg}`);
-    const memberColName = 140;
-    const memberColPaid = 160;
-    const memberColShould = 160;
+    const memberColName = 180;
+    const memberColPaid = 150;
+    const memberColShould = 150;
     const memberColBalance = pageWidth - padding * 2 - memberColName - memberColPaid - memberColShould;
     addRow([
       { text: '成员', x: 0, width: memberColName },
@@ -1956,7 +1961,7 @@ Page({
       const name = m.name || '';
       if (noIncomeExpenseMembers.indexOf(name) !== -1) return;
       addRow([
-        { text: name, x: 0, width: memberColName },
+        { text: name, x: 0, width: memberColName, wrap: true },
         { text: `¥${m.bal ? m.bal.paid : '0.0'}`, x: memberColName, width: memberColPaid },
         { text: `¥${m.bal ? m.bal.shouldPay : '0.0'}`, x: memberColName + memberColPaid, width: memberColShould },
         { text: `¥${m.bal ? m.bal.balance : '0.0'}`, x: memberColName + memberColPaid + memberColShould, width: memberColBalance }
@@ -1969,7 +1974,7 @@ Page({
       const memberName = m.name || '';
       if (!memberName) return;
       if (noIncomeExpenseMembers.indexOf(memberName) !== -1) return;
-      const details = detailMap[memberName] || this.buildMemberBillDetails(memberName, bills, rawRecharges, isPrepaid, keeper);
+      const details = detailMap[memberName] || this.buildMemberBillDetails(memberName, bills, rawRecharges, isPrepaid, keeper, currentMemberSet);
 
       addMemberTitle(`${memberName} 结算信息`);
 
@@ -1979,49 +1984,51 @@ Page({
       pushLine({ type: 'text', text: `收入：¥${this.formatAmount(incomeTotal)}  支出：¥${this.formatAmount(expenseTotal)}  余额：¥${balance}`, fontSize: 20, color: '#111111', bold: false });
 
       addBoldText(`${memberName} 收入信息`);
-      const incomeColTitle = 260;
-      const incomeColCounter = 200;
-      const incomeColAmount = 110;
-      const incomeColDate = pageWidth - padding * 2 - incomeColTitle - incomeColCounter - incomeColAmount;
+      const incomeColGap = 36;
+      const incomeColTitle = 300;
+      const incomeColCounter = 160;
+      const incomeColAmount = 100;
+      const incomeColDate = pageWidth - padding * 2 - incomeColTitle - incomeColCounter - incomeColAmount - incomeColGap;
       addRow([
         { text: '名称', x: 0, width: incomeColTitle },
-        { text: '付款人', x: incomeColTitle, width: incomeColCounter },
-        { text: '金额', x: incomeColTitle + incomeColCounter, width: incomeColAmount },
-        { text: '日期', x: incomeColTitle + incomeColCounter + incomeColAmount, width: incomeColDate }
+        { text: '付款人', x: incomeColTitle + incomeColGap, width: incomeColCounter },
+        { text: '金额', x: incomeColTitle + incomeColGap + incomeColCounter, width: incomeColAmount },
+        { text: '日期', x: incomeColTitle + incomeColGap + incomeColCounter + incomeColAmount, width: incomeColDate }
       ], 18);
       if (details.incomeBills.length === 0) {
         addText('暂无记录');
       } else {
         details.incomeBills.forEach((row) => {
           addRow([
-            { text: row.title || '未命名', x: 0, width: incomeColTitle },
-            { text: row.payer || '', x: incomeColTitle, width: incomeColCounter, wrap: true },
-            { text: `¥${row.amount || '0.0'}`, x: incomeColTitle + incomeColCounter, width: incomeColAmount },
-            { text: row.date || '', x: incomeColTitle + incomeColCounter + incomeColAmount, width: incomeColDate }
+            { text: row.title || '未命名', x: 0, width: incomeColTitle, wrap: true },
+            { text: row.payer || '', x: incomeColTitle + incomeColGap, width: incomeColCounter, wrap: true },
+            { text: `¥${row.amount || '0.0'}`, x: incomeColTitle + incomeColGap + incomeColCounter, width: incomeColAmount },
+            { text: row.date || '', x: incomeColTitle + incomeColGap + incomeColCounter + incomeColAmount, width: incomeColDate }
           ], 18);
         });
       }
 
       addBoldText(`${memberName} 支出信息`);
-      const expenseColTitle = 260;
-      const expenseColCounter = 200;
-      const expenseColAmount = 110;
-      const expenseColDate = pageWidth - padding * 2 - expenseColTitle - expenseColCounter - expenseColAmount;
+      const expenseColGap = 36;
+      const expenseColTitle = 300;
+      const expenseColCounter = 160;
+      const expenseColAmount = 100;
+      const expenseColDate = pageWidth - padding * 2 - expenseColTitle - expenseColCounter - expenseColAmount - expenseColGap;
       addRow([
         { text: '名称', x: 0, width: expenseColTitle },
-        { text: '收款人', x: expenseColTitle, width: expenseColCounter },
-        { text: '金额', x: expenseColTitle + expenseColCounter, width: expenseColAmount },
-        { text: '日期', x: expenseColTitle + expenseColCounter + expenseColAmount, width: expenseColDate }
+        { text: '收款人', x: expenseColTitle + expenseColGap, width: expenseColCounter },
+        { text: '金额', x: expenseColTitle + expenseColGap + expenseColCounter, width: expenseColAmount },
+        { text: '日期', x: expenseColTitle + expenseColGap + expenseColCounter + expenseColAmount, width: expenseColDate }
       ], 18);
       if (details.expenseBills.length === 0) {
         addText('暂无记录');
       } else {
         details.expenseBills.forEach((row) => {
           addRow([
-            { text: row.title || '未命名', x: 0, width: expenseColTitle },
-            { text: row.payee || '', x: expenseColTitle, width: expenseColCounter, wrap: true },
-            { text: `¥${row.amount || '0.0'}`, x: expenseColTitle + expenseColCounter, width: expenseColAmount },
-            { text: row.date || '', x: expenseColTitle + expenseColCounter + expenseColAmount, width: expenseColDate }
+            { text: row.title || '未命名', x: 0, width: expenseColTitle, wrap: true },
+            { text: row.payee || '', x: expenseColTitle + expenseColGap, width: expenseColCounter, wrap: true },
+            { text: `¥${row.amount || '0.0'}`, x: expenseColTitle + expenseColGap + expenseColCounter, width: expenseColAmount },
+            { text: row.date || '', x: expenseColTitle + expenseColGap + expenseColCounter + expenseColAmount, width: expenseColDate }
           ], 18);
         });
       }
@@ -2112,7 +2119,7 @@ Page({
   },
 
 
-  buildMemberBillDetails(memberName, rawBills, rawRecharges, isPrepaid, keeper) {
+  buildMemberBillDetails(memberName, rawBills, rawRecharges, isPrepaid, keeper, currentMemberSet = null) {
     let incomeBills = [];
     let expenseBills = [];
 
@@ -2173,7 +2180,7 @@ Page({
         const payeeList = [];
         if (b.participants) {
           Object.keys(b.participants).forEach(name => {
-            if (b.participants[name] > 0) {
+            if (b.participants[name] > 0 && (!currentMemberSet || currentMemberSet.has(name))) {
               payeeList.push(name);
             }
           });
