@@ -27,8 +27,8 @@ Page({
     payerDisabled: false, // 付款人是否禁用
     defaultTypes: ['聚餐', '人情账', '麻将', '门票', '礼品', '衣服'], // 系统默认类型
     commonTypes: ['聚餐', '人情账', '麻将', '门票', '礼品', '衣服'], // 常用类型（包含系统类型和自定义类型）
-    recentBillTitles: [], // 最近的账单名称列表
-    showTitlePicker: false, // 是否显示账单名称选择器
+    allBillTitles: [], // 当前活动下去重后的账单名称
+    matchedBillTitles: [], // 账单名称关键词匹配列表
   },
   
   onShareAppMessage() {
@@ -242,39 +242,23 @@ Page({
       const dbCloud = wx.cloud.database();
       const activityId = this.data.activityId;
       
-      // 查询最近一次账单和最近的账单名称列表
+      // 查询最近一次账单
       let lastBill = null;
       let lastBillParticipants = null;
-      let recentBillTitles = [];
       try {
-        // 查询最近的账单（最多5条，用于获取账单名称列表）
+        // 查询最近的账单（用于继承权重和类型）
         const recentBillsRes = await dbCloud.collection('bills')
           .where({ activityId: activityId })
           .orderBy('createdAt', 'desc')
-          .limit(5)
+          .limit(1)
           .get();
 
         if (recentBillsRes.data && recentBillsRes.data.length > 0) {
           // 获取最近一次账单
           lastBill = recentBillsRes.data[0];
           lastBillParticipants = lastBill.participants || null;
-          
-          // 提取最近的账单名称列表（去重，保留顺序）
-          const titleSet = new Set();
-          recentBillTitles = recentBillsRes.data
-            .map(bill => bill.title)
-            .filter(title => {
-              if (title && !titleSet.has(title)) {
-                titleSet.add(title);
-                return true;
-              }
-              return false;
-            });
-          
-          // 继承最近一次账单的名称和类型
-          if (lastBill.title) {
-            this.setData({ title: lastBill.title });
-          }
+
+          // 新增账单时账单名称默认保持为空，不继承上次名称
           // 继承最近一次账单的类型，如果没有则保持默认值"聚餐"
           if (lastBill.billType) {
             this.setData({ billType: lastBill.billType });
@@ -287,8 +271,9 @@ Page({
         console.log('查询最近一次账单失败（可能没有索引）:', e);
       }
       
-      // 设置最近的账单名称列表
-      this.setData({ recentBillTitles });
+      // 预加载当前活动下所有去重账单名称，用于关键词匹配
+      const allBillTitles = await this.loadAllBillTitles(activityId);
+      this.setData({ allBillTitles, matchedBillTitles: [] });
       
       // 加载成员列表
       const groupRes = await dbCloud.collection('groups')
@@ -317,6 +302,49 @@ Page({
     } catch (e) {
       console.error('加载参与成员失败:', e);
     }
+  },
+
+  async loadAllBillTitles(activityId) {
+    const dbCloud = wx.cloud.database();
+    const limit = 100;
+    let skip = 0;
+    const titleSet = new Set();
+    const titleList = [];
+
+    while (skip <= 1000) {
+      let res;
+      try {
+        res = await dbCloud.collection('bills')
+          .where({ activityId })
+          .orderBy('createdAt', 'desc')
+          .skip(skip)
+          .limit(limit)
+          .get();
+      } catch (e) {
+        console.log('按时间查询账单名称失败，改为默认顺序查询:', e);
+        res = await dbCloud.collection('bills')
+          .where({ activityId })
+          .skip(skip)
+          .limit(limit)
+          .get();
+      }
+
+      const bills = (res && res.data) || [];
+      bills.forEach((bill) => {
+        const title = (bill && bill.title ? bill.title : '').trim();
+        if (title && !titleSet.has(title)) {
+          titleSet.add(title);
+          titleList.push(title);
+        }
+      });
+
+      if (bills.length < limit) {
+        break;
+      }
+      skip += bills.length;
+    }
+
+    return titleList;
   },
   
   async loadBillData() {
@@ -502,12 +530,20 @@ Page({
   selectTitle(e) {
     const title = e.currentTarget.dataset.title;
     if (title) {
-      this.setData({ title: title });
+      this.setData({ title: title, matchedBillTitles: [] });
     }
   },
-  
-  clearTitle() {
-    this.setData({ title: '' });
+
+  updateMatchedBillTitles(keyword) {
+    if (this.data.isEdit || this.data.isReadOnly) return;
+    const normalizedKeyword = (keyword || '').trim();
+    if (!normalizedKeyword) {
+      this.setData({ matchedBillTitles: [] });
+      return;
+    }
+
+    const matchedBillTitles = (this.data.allBillTitles || []).filter(title => title.includes(normalizedKeyword));
+    this.setData({ matchedBillTitles });
   },
   
   deleteBill() {
@@ -614,6 +650,7 @@ Page({
       return;
     }
     this.setData({ title });
+    this.updateMatchedBillTitles(title);
   },
   
   // 选择账单类型

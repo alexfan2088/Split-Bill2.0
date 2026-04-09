@@ -21,12 +21,11 @@
       <text class="label">账单名称</text>
       <view class="title-input-row">
         <input class="input input-title" type="text" placeholder="例如：晚餐、山姆购物" value="{{title}}" bindinput="onTitleInput" maxlength="20" disabled="{{isReadOnly}}" />
-        <view wx:if="{{!isReadOnly}}" class="btn-title-clear-inline" bindtap="clearTitle">清空</view>
       </view>
-      <view wx:if="{{!isReadOnly && !isEdit && recentBillTitles.length > 0}}" class="recent-titles">
-        <view class="recent-titles-label">最近账单名称：</view>
+      <view wx:if="{{!isReadOnly && !isEdit && matchedBillTitles.length > 0}}" class="recent-titles">
+        <view class="recent-titles-label">匹配账单名称：</view>
         <view class="recent-titles-buttons">
-          <view wx:for="{{recentBillTitles}}" wx:key="*this" class="btn-title-item" bindtap="selectTitle" data-title="{{item}}">{{item}}</view>
+          <view wx:for="{{matchedBillTitles}}" wx:key="*this" class="btn-title-item" bindtap="selectTitle" data-title="{{item}}">{{item}}</view>
         </view>
       </view>
       <text class="hint">最多20个汉字</text>
