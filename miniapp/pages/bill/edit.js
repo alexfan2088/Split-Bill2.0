@@ -27,8 +27,8 @@ Page({
     payerDisabled: false, // 付款人是否禁用
     defaultTypes: ['聚餐', '人情账', '麻将', '门票', '礼品', '衣服'], // 系统默认类型
     commonTypes: ['聚餐', '人情账', '麻将', '门票', '礼品', '衣服'], // 常用类型（包含系统类型和自定义类型）
-    allBillTitles: [], // 当前活动下去重后的账单名称
-    matchedBillTitles: [], // 账单名称关键词匹配列表
+    allBillTitleOptions: [], // 当前活动下的历史账单名称候选（可同名多条）
+    matchedBillTitleOptions: [], // 账单名称关键词匹配列表
   },
   
   onShareAppMessage() {
@@ -271,9 +271,9 @@ Page({
         console.log('查询最近一次账单失败（可能没有索引）:', e);
       }
       
-      // 预加载当前活动下所有去重账单名称，用于关键词匹配
-      const allBillTitles = await this.loadAllBillTitles(activityId);
-      this.setData({ allBillTitles, matchedBillTitles: [] });
+      // 预加载当前活动下所有历史账单标题候选，用于关键词匹配
+      const allBillTitleOptions = await this.loadAllBillTitleOptions(activityId);
+      this.setData({ allBillTitleOptions, matchedBillTitleOptions: [] });
       
       // 加载成员列表
       const groupRes = await dbCloud.collection('groups')
@@ -304,12 +304,23 @@ Page({
     }
   },
 
-  async loadAllBillTitles(activityId) {
+  formatHistoryBillTime(raw) {
+    if (!raw) return '';
+    const d = raw.getTime ? raw : new Date(raw);
+    if (Number.isNaN(d.getTime())) return '';
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    return `${year}-${month}-${day} ${hours}:${minutes}`;
+  },
+
+  async loadAllBillTitleOptions(activityId) {
     const dbCloud = wx.cloud.database();
     const limit = 100;
     let skip = 0;
-    const titleSet = new Set();
-    const titleList = [];
+    const options = [];
 
     while (skip <= 1000) {
       let res;
@@ -330,11 +341,17 @@ Page({
       }
 
       const bills = (res && res.data) || [];
-      bills.forEach((bill) => {
+      bills.forEach((bill, index) => {
         const title = (bill && bill.title ? bill.title : '').trim();
-        if (title && !titleSet.has(title)) {
-          titleSet.add(title);
-          titleList.push(title);
+        if (title) {
+          const amount = Number(bill.amount || 0);
+          const amountText = Number.isFinite(amount) ? amount.toFixed(1).replace(/\.0$/, '') : '0';
+          const timeText = this.formatHistoryBillTime(bill.time || bill.createdAt);
+          options.push({
+            id: bill._id || `${skip}-${index}`,
+            title,
+            subtitle: `${timeText} | ¥${amountText}`
+          });
         }
       });
 
@@ -344,7 +361,7 @@ Page({
       skip += bills.length;
     }
 
-    return titleList;
+    return options;
   },
   
   async loadBillData() {
@@ -528,9 +545,11 @@ Page({
   },
   
   selectTitle(e) {
-    const title = e.currentTarget.dataset.title;
+    const id = e.currentTarget.dataset.id;
+    const selected = (this.data.matchedBillTitleOptions || []).find(item => item.id === id);
+    const title = selected ? selected.title : '';
     if (title) {
-      this.setData({ title: title, matchedBillTitles: [] });
+      this.setData({ title, matchedBillTitleOptions: [] });
     }
   },
 
@@ -538,12 +557,13 @@ Page({
     if (this.data.isEdit || this.data.isReadOnly) return;
     const normalizedKeyword = (keyword || '').trim();
     if (!normalizedKeyword) {
-      this.setData({ matchedBillTitles: [] });
+      this.setData({ matchedBillTitleOptions: [] });
       return;
     }
 
-    const matchedBillTitles = (this.data.allBillTitles || []).filter(title => title.includes(normalizedKeyword));
-    this.setData({ matchedBillTitles });
+    const matchedBillTitleOptions = (this.data.allBillTitleOptions || [])
+      .filter(item => item.title.includes(normalizedKeyword));
+    this.setData({ matchedBillTitleOptions });
   },
   
   deleteBill() {

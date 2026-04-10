@@ -137,7 +137,15 @@
   font-size: 24rpx;
   color: #007bff;
   background-color: white;
-  text-align: center;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+
+.btn-title-item-sub {
+  font-size: 20rpx;
+  color: #7a8ca3;
 }
 
 .btn-title-item:active {
