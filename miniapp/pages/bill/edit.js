@@ -318,7 +318,8 @@ Page({
 
   async loadAllBillTitleOptions(activityId) {
     const dbCloud = wx.cloud.database();
-    const limit = 100;
+    // 小程序云数据库单次查询上限为20，需分页拉取全量历史账单
+    const limit = 20;
     let skip = 0;
     const options = [];
 
