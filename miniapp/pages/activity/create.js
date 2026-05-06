@@ -7,7 +7,7 @@ Page({
     isEdit: false,
     activityId: '',
     name: '',
-    type: '',
+    type: '聚餐',
     members: [],
     memberNames: [],
     newMemberName: '',
@@ -605,7 +605,8 @@ Page({
   
   async saveActivity() {
     const name = this.data.name.trim();
-    const type = this.data.type.trim();
+    let type = this.data.type.trim();
+    if (!type) type = '聚餐';
     const remark = this.data.remark.trim();
     
     if (!name) {
@@ -616,15 +617,6 @@ Page({
       return;
     }
     
-    if (!type) {
-      wx.showModal({
-        title: '提示',
-        content: '请选择或输入活动类型',
-        showCancel: false,
-        confirmText: '确定'
-      });
-      return;
-    }
     
     // 使用当前成员列表
     let memberNames = (this.data.memberNames || []).slice();

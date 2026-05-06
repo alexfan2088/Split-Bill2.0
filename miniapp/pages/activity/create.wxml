@@ -6,16 +6,7 @@
       <input class="input" type="text" placeholder="例如：周末聚餐" value="{{name}}" bindinput="onNameInput" maxlength="20" />
     </view>
     
-    <view class="form-item">
-      <text class="label">活动类型</text>
-      <view class="type-tags">
-        <view wx:for="{{commonTypes}}" wx:key="*this" class="type-tag {{type === item ? 'active' : ''}}" bindtap="selectType" bindlongpress="deleteType" data-type="{{item}}">
-          {{item}}
-        </view>
-      </view>
-      <input class="input" type="text" placeholder="或输入新类型" value="{{type}}" bindinput="onTypeInput" bindblur="onTypeBlur" maxlength="10" />
-    </view>
-    
+
     <view class="form-item">
       <text class="label">参与成员（<text class="label-highlight">逐个添加</text>）</text>
       <view class="hint">提示：创建者（{{creator}}）会自动添加在第一位，且不可删除</view>

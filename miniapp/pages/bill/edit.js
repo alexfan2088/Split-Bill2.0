@@ -233,7 +233,7 @@ Page({
       attachmentItems: [],
     });
     
-    // 加载活动成员并继承最近一次账单的权重
+    // 初始化消费方（新建账单：默认全部为0）
     await this.loadParticipantsWithInheritance();
   },
   
@@ -286,21 +286,15 @@ Page({
         members = groupRes.data[0].members || [];
       }
       
-      // 生成参与成员列表，继承权重
+      // 生成消费方列表：新建账单默认全部为0
       const participants = members.map(m => {
         const name = typeof m === 'string' ? m : m.name;
-        let weight = 2; // 默认权重为2
-        
-        if (lastBillParticipants && lastBillParticipants.hasOwnProperty(name)) {
-          weight = Number(lastBillParticipants[name]) || 0;
-        }
-        
-        return { name, weight };
+        return { name, weight: 0 };
       });
       
       this.setData({ participants });
     } catch (e) {
-      console.error('加载参与成员失败:', e);
+      console.error('加载消费方失败:', e);
     }
   },
 

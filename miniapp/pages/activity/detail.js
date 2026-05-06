@@ -25,10 +25,10 @@ Page({
     rawBills: [], // 原始账单数据，含分摊详情
     rawRecharges: [], // 原始充值数据
     showMemberBills: false,
-    selectedMemberBills: [], // 用户应付账单列表（收入）
+    selectedMemberBills: [], // 用户应付账单列表（消费）
     selectedMemberPaidBills: [], // 用户实付账单列表（支出）
     selectedMemberName: '',
-    selectedMemberIncome: '0.00', // 收入总额
+    selectedMemberIncome: '0.00', // 消费总额
     selectedMemberExpense: '0.00', // 支出总额
     selectedMemberBalance: '0.00', // 余额
     pdfCanvasWidth: 750,
@@ -913,6 +913,9 @@ Page({
       memberPaidBills
     });
 
+    const showSelectedMemberConsume = (memberBills || []).length > 0;
+    const showSelectedMemberExpense = (memberPaidBills || []).length > 0;
+
     this.setData({
       selectedMemberBills: memberBills,
       selectedMemberPaidBills: memberPaidBills,
@@ -920,6 +923,8 @@ Page({
       selectedMemberIncome: this.formatAmount(totals.incomeTotal), // 收入总额
       selectedMemberExpense: this.formatAmount(totals.expenseTotal), // 支出总额
       selectedMemberBalance: this.formatAmount(totals.balance), // 余额
+      showSelectedMemberConsume,
+      showSelectedMemberExpense,
       showMemberBills: true,
     });
   },
@@ -934,6 +939,8 @@ Page({
       selectedMemberIncome: '0.00',
       selectedMemberExpense: '0.00',
       selectedMemberBalance: '0.00',
+      showSelectedMemberConsume: false,
+      showSelectedMemberExpense: false,
     });
   },
 
@@ -1542,7 +1549,9 @@ Page({
 
         startDrift(88, 1, 180);
         let downloadRes;
+        let downloadTarget = '';
         try {
+          // 兼容：手机端通常返回本地 tempFilePath；mac 开发者工具有时会返回 http://tmp/...（无法直接 saveFile）
           downloadRes = await new Promise((resolve, reject) => {
             wx.downloadFile({
               url: tempUrl,
@@ -1550,18 +1559,33 @@ Page({
               fail: reject
             });
           });
+
+          const maybePath = (downloadRes && (downloadRes.tempFilePath || downloadRes.filePath)) || '';
+          if (typeof maybePath === 'string' && /^https?:\/\//i.test(maybePath)) {
+            downloadTarget = `${wx.env.USER_DATA_PATH}/__pdf_download_${Date.now()}_${i}.pdf`;
+            downloadRes = await new Promise((resolve, reject) => {
+              wx.downloadFile({
+                url: tempUrl,
+                filePath: downloadTarget,
+                success: resolve,
+                fail: reject
+              });
+            });
+          }
+
           console.log('[PDF] download status:', downloadRes && downloadRes.statusCode);
-          console.log('[PDF] download path:', downloadRes && downloadRes.tempFilePath);
+          console.log('[PDF] download path:', downloadRes && (downloadRes.filePath || downloadRes.tempFilePath));
         } catch (e) {
           console.error('[PDF] downloadFile failed:', e);
           throw e;
         }
+        const localPdfPath = (downloadRes && (downloadRes.filePath || downloadRes.tempFilePath)) || downloadTarget;
         progressDone += 1;
         updateTargetBySteps(progressDone, progressTotal);
 
         const partName = chunkCount > 1 ? `${baseName}-${String(i + 1).padStart(2, '0')}.pdf` : fileName;
         startDrift(93, 1, 200);
-        const savedPath = await this.savePdfFile(downloadRes.tempFilePath, partName);
+        const savedPath = await this.savePdfFile(localPdfPath, partName);
         savedPaths.push(savedPath);
         savedNames.push(partName);
         progressDone += 1;
@@ -1981,9 +2005,9 @@ Page({
       const incomeTotal = details.incomeBills.reduce((sum, b) => sum + Number(b.amount || 0), 0);
       const expenseTotal = details.expenseBills.reduce((sum, b) => sum + Number(b.amount || 0), 0);
       const balance = this.formatAmount(Number(m.bal ? m.bal.balance : 0));
-      pushLine({ type: 'text', text: `收入：¥${this.formatAmount(incomeTotal)}  支出：¥${this.formatAmount(expenseTotal)}  余额：¥${balance}`, fontSize: 20, color: '#111111', bold: false });
+      pushLine({ type: 'text', text: `消费：¥${this.formatAmount(incomeTotal)}  支出：¥${this.formatAmount(expenseTotal)}  余额：¥${balance}`, fontSize: 20, color: '#111111', bold: false });
 
-      addBoldText(`${memberName} 收入信息`);
+      addBoldText(`${memberName} 消费信息`);
       const incomeColGap = 36;
       const incomeColTitle = 300;
       const incomeColCounter = 160;
@@ -2016,7 +2040,7 @@ Page({
       const expenseColDate = pageWidth - padding * 2 - expenseColTitle - expenseColCounter - expenseColAmount - expenseColGap;
       addRow([
         { text: '名称', x: 0, width: expenseColTitle },
-        { text: '收款人', x: expenseColTitle + expenseColGap, width: expenseColCounter },
+        { text: '去向', x: expenseColTitle + expenseColGap, width: expenseColCounter },
         { text: '金额', x: expenseColTitle + expenseColGap + expenseColCounter, width: expenseColAmount },
         { text: '日期', x: expenseColTitle + expenseColGap + expenseColCounter + expenseColAmount, width: expenseColDate }
       ], 18);
@@ -2037,7 +2061,7 @@ Page({
     });
 
     if (noIncomeExpenseMembers.length > 0) {
-      addGreenNote(`${noIncomeExpenseMembers.join('、')} 没有产生收入和支出`);
+      addGreenNote(`${noIncomeExpenseMembers.join('、')} 没有产生消费和支出`);
     }
 
     return { pages, pageWidth, pageHeight, padding, lineHeight };

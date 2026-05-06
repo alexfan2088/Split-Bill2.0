@@ -86,6 +86,18 @@ exports.main = async (event, context) => {
       const hashedPassword = hashPassword(password);
       
       if (existingUser.password === hashedPassword) {
+        // 记录最近一次登录时间（仅用于后台查看）
+        try {
+          await db.collection('users').doc(existingUser._id).update({
+            data: {
+              lastLoginAt: new Date(),
+              updatedAt: new Date()
+            }
+          });
+        } catch (e) {
+          console.log('更新 lastLoginAt 失败（可忽略）:', e);
+        }
+
         return {
           success: true,
           userName: userName
@@ -137,7 +149,8 @@ exports.main = async (event, context) => {
           name: userName,
           password: hashedPassword,
           createdAt: new Date(),
-          updatedAt: new Date()
+          updatedAt: new Date(),
+          lastLoginAt: new Date()
         }
       });
       

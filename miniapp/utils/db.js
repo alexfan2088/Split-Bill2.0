@@ -132,6 +132,18 @@ async function login(userName, password) {
       if (plainPasswordToSave) {
         wx.setStorageSync('aa_user_password_plain', plainPasswordToSave);
       }
+
+      // 记录最近一次登录时间（仅用于后台查看，不影响界面）
+      try {
+        await db.collection('users').doc(existingUser._id).update({
+          data: {
+            lastLoginAt: new Date(),
+            updatedAt: new Date()
+          }
+        });
+      } catch (e) {
+        console.log('更新 lastLoginAt 失败（可忽略）:', e);
+      }
       
       return { success: true, userName };
     } else {
@@ -197,7 +209,8 @@ async function register(userName, password, confirmPassword) {
         name: userName,
         password: hashedPassword,
         createdAt: new Date(),
-        updatedAt: new Date()
+        updatedAt: new Date(),
+        lastLoginAt: new Date()
       }
     });
     

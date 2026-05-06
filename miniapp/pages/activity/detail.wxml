@@ -145,7 +145,7 @@
           <view class="member-info">
             <view class="member-name">{{item.name}}</view>
             <view class="member-detail">
-              <text wx:if="{{isPrepaid && item.isKeeper}}">{{item.name}}收入：¥{{item.bal.shouldPay}} | {{item.name}}支出：¥{{item.bal.paid}}</text>
+              <text wx:if="{{isPrepaid && item.isKeeper}}">{{item.name}}消费：¥{{item.bal.shouldPay}} | {{item.name}}支出：¥{{item.bal.paid}}</text>
               <text wx:else>实付：¥{{item.bal.paid}} | 应付：¥{{item.bal.shouldPay}}</text>
             </view>
           </view>
@@ -155,12 +155,6 @@
         </view>
       </view>
       
-      <view wx:if="{{suggestionMember && !isPrepaid}}" class="suggestion-card">
-        <view class="suggestion-title">建议下一次买单人员</view>
-        <view class="suggestion-content">
-          <text class="suggestion-name">{{suggestionMember.name}}</text> 应付：¥{{suggestionMember.shouldPay}}，实付：¥{{suggestionMember.paid}}
-        </view>
-      </view>
     </view>
   </view>
 
@@ -174,11 +168,11 @@
         <scroll-view class="modal-body" scroll-y="true" show-scrollbar="{{false}}">
           <!-- 汇总信息 -->
           <view class="summary-section">
-            <view class="summary-row">
-              <text class="summary-label">{{selectedMemberName}}收入：</text>
+            <view class="summary-row" wx:if="{{showSelectedMemberConsume}}">
+              <text class="summary-label">{{selectedMemberName}}消费：</text>
               <text class="summary-value income">¥{{selectedMemberIncome}}</text>
             </view>
-            <view class="summary-row">
+            <view class="summary-row" wx:if="{{showSelectedMemberExpense}}">
               <text class="summary-label">{{selectedMemberName}}支出：</text>
               <text class="summary-value expense">¥{{selectedMemberExpense}}</text>
             </view>
@@ -188,10 +182,10 @@
             </view>
           </view>
           
-          <!-- 收入账单列表 -->
-          <view class="bill-section">
-            <view class="section-title">{{selectedMemberName}}收入</view>
-            <view wx:if="{{selectedMemberBills.length === 0}}" class="empty-tip">暂无{{selectedMemberName}}收入账单</view>
+          <!-- 消费账单列表 -->
+          <view class="bill-section" wx:if="{{showSelectedMemberConsume}}">
+            <view class="section-title">{{selectedMemberName}}消费</view>
+            <view wx:if="{{selectedMemberBills.length === 0}}" class="empty-tip">暂无{{selectedMemberName}}消费账单</view>
             <view wx:if="{{selectedMemberBills.length > 0}}" class="bill-table">
               <view class="bill-table-header">
                 <text class="col-name">名称</text>
@@ -209,13 +203,13 @@
           </view>
           
           <!-- 支出账单列表 -->
-          <view class="bill-section">
+          <view class="bill-section" wx:if="{{showSelectedMemberExpense}}">
             <view class="section-title">{{selectedMemberName}}支出</view>
             <view wx:if="{{selectedMemberPaidBills.length === 0}}" class="empty-tip">暂无{{selectedMemberName}}支出账单</view>
             <view wx:if="{{selectedMemberPaidBills.length > 0}}" class="bill-table">
               <view class="bill-table-header">
                 <text class="col-name">名称</text>
-                <text class="col-payee">收款人</text>
+                <text class="col-payee">去向</text>
                 <text class="col-total">总金额</text>
                 <text class="col-date">日期</text>
               </view>

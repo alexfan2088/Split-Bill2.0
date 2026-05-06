@@ -7,7 +7,7 @@
       <text class="hint">可输入 3+5= 自动计算</text>
     </view>
     
-    <view class="form-item">
+    <view class="form-item" style="display:none">
       <text class="label">账单类型</text>
       <view class="type-tags">
         <view wx:for="{{commonTypes}}" wx:key="*this" class="type-tag {{billType === item ? 'active' : ''}}" bindtap="selectBillType" bindlongpress="deleteType" data-type="{{item}}">
@@ -59,7 +59,7 @@
     </view>
     
     <view class="form-item">
-      <text class="label">参与成员（选择权重：0表示不参与，1-3表示人数）</text>
+      <text class="label">消费方（选择权重：0表示不参与，1-3表示人数）</text>
       <view class="participants-list">
         <view wx:for="{{participants}}" wx:key="name" class="participant-item">
           <view class="participant-name">{{item.name}}</view>
