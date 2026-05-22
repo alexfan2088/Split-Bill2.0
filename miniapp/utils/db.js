@@ -68,6 +68,45 @@ function getCurrentUserPasswordHash() {
   return wx.getStorageSync('aa_user_password') || '';
 }
 
+async function fetchAll(collection, query, options = {}) {
+  const limit = options.limit || 20;
+  let all = [];
+  let skip = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    let request = collection.where(query);
+    if (options.orderBy && options.orderBy.field) {
+      request = request.orderBy(options.orderBy.field, options.orderBy.direction || 'desc');
+    }
+
+    const res = await request.skip(skip).limit(limit).get();
+    const data = res.data || [];
+    all = all.concat(data);
+
+    if (data.length < limit) {
+      hasMore = false;
+    } else {
+      skip += limit;
+    }
+  }
+
+  return all;
+}
+
+async function deleteManyByActivityId(collectionName, activityId) {
+  const records = await fetchAll(db.collection(collectionName), { activityId });
+  if (records.length === 0) {
+    return 0;
+  }
+
+  await Promise.all(records.map(record => (
+    db.collection(collectionName).doc(record._id).remove()
+  )));
+
+  return records.length;
+}
+
 // 用户登录（验证密码）
 async function login(userName, password) {
   try {
@@ -227,12 +266,9 @@ async function getActivities() {
   }
   
   try {
-    const res = await db.collection('activities')
-      .where({
-        memberNames: db.command.in([userName])
-      })
-      .get();
-    return res.data || [];
+    return await fetchAll(db.collection('activities'), {
+      memberNames: db.command.in([userName])
+    });
   } catch (e) {
     console.error('获取活动列表失败:', e);
     wx.showToast({
@@ -246,11 +282,9 @@ async function getActivities() {
 // 获取账单列表
 async function getBills(activityId) {
   try {
-    const res = await db.collection('bills')
-      .where({ activityId })
-      .orderBy('time', 'desc')
-      .get();
-    return res.data || [];
+    return await fetchAll(db.collection('bills'), { activityId }, {
+      orderBy: { field: 'time', direction: 'desc' }
+    });
   } catch (e) {
     console.error('获取账单列表失败:', e);
     return [];
@@ -310,69 +344,18 @@ async function deleteBill(billId) {
   }
 }
 
-// 删除活动（同时删除关联的账单和group）
+// 删除活动（同时删除关联的账单、充值记录和group）
 async function deleteActivity(activityId) {
   try {
-    // 1. 先删除该活动下的所有账单
-    try {
-      const billsRes = await db.collection('bills')
-        .where({ activityId: activityId })
-        .get();
-      
-      if (billsRes.data && billsRes.data.length > 0) {
-        console.log(`删除活动 ${activityId} 下的 ${billsRes.data.length} 个账单`);
-        // 批量删除账单
-        const deletePromises = billsRes.data.map(bill => 
-          db.collection('bills').doc(bill._id).remove()
-        );
-        await Promise.all(deletePromises);
-        console.log('所有账单已删除');
-      }
-    } catch (e) {
-      console.error('删除账单失败:', e);
-      // 继续删除活动，不因为账单删除失败而中断
-    }
+    const deletedBills = await deleteManyByActivityId('bills', activityId);
+    console.log(`删除活动 ${activityId} 下的 ${deletedBills} 个账单`);
+
+    const deletedRecharges = await deleteManyByActivityId('recharges', activityId);
+    console.log(`删除活动 ${activityId} 下的 ${deletedRecharges} 条充值记录`);
+
+    const deletedGroups = await deleteManyByActivityId('groups', activityId);
+    console.log(`删除活动 ${activityId} 下的 ${deletedGroups} 个group`);
     
-    // 2. 删除关联的充值记录（预存记录）
-    try {
-      const rechargesRes = await db.collection('recharges')
-        .where({ activityId: activityId })
-        .get();
-      
-      if (rechargesRes.data && rechargesRes.data.length > 0) {
-        console.log(`删除活动 ${activityId} 下的 ${rechargesRes.data.length} 条充值记录`);
-        // 批量删除充值记录
-        const deletePromises = rechargesRes.data.map(recharge => 
-          db.collection('recharges').doc(recharge._id).remove()
-        );
-        await Promise.all(deletePromises);
-        console.log('所有充值记录已删除');
-      }
-    } catch (e) {
-      console.error('删除充值记录失败:', e);
-      // 继续删除活动，不因为充值记录删除失败而中断
-    }
-    
-    // 3. 删除关联的group
-    try {
-      const groupsRes = await db.collection('groups')
-        .where({ activityId: activityId })
-        .get();
-      
-      if (groupsRes.data && groupsRes.data.length > 0) {
-        console.log(`删除活动 ${activityId} 下的 ${groupsRes.data.length} 个group`);
-        const deletePromises = groupsRes.data.map(group => 
-          db.collection('groups').doc(group._id).remove()
-        );
-        await Promise.all(deletePromises);
-        console.log('所有group已删除');
-      }
-    } catch (e) {
-      console.error('删除group失败:', e);
-      // 继续删除活动，不因为group删除失败而中断
-    }
-    
-    // 4. 最后删除活动本身
     await db.collection('activities').doc(activityId).remove();
     console.log('活动已删除');
     
@@ -386,11 +369,9 @@ async function deleteActivity(activityId) {
 // 获取充值列表
 async function getRecharges(activityId) {
   try {
-    const res = await db.collection('recharges')
-      .where({ activityId })
-      .orderBy('date', 'desc')
-      .get();
-    return res.data || [];
+    return await fetchAll(db.collection('recharges'), { activityId }, {
+      orderBy: { field: 'date', direction: 'desc' }
+    });
   } catch (e) {
     console.error('获取充值列表失败:', e);
     return [];
