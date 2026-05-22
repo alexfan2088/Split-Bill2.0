@@ -6,6 +6,7 @@ cloud.init({
 });
 
 const db = cloud.database();
+const { deleteActivityRecords } = require('./deleteActivityCore');
 
 // 密码哈希函数（与客户端保持一致）
 function hashPassword(password) {
@@ -446,34 +447,7 @@ exports.main = async (event) => {
         return { success: false, error: '只有创建者可以删除活动' };
       }
 
-      // 删除该活动下的所有账单
-      try {
-        const billsRes = await db.collection('bills')
-          .where({ activityId })
-          .get();
-        const bills = billsRes.data || [];
-        if (bills.length > 0) {
-          await Promise.all(bills.map(bill => db.collection('bills').doc(bill._id).remove()));
-        }
-      } catch (e) {
-        console.error('删除账单失败:', e);
-      }
-
-      // 删除活动对应的group
-      try {
-        const groupRes = await db.collection('groups')
-          .where({ activityId })
-          .get();
-        const groups = groupRes.data || [];
-        if (groups.length > 0) {
-          await Promise.all(groups.map(g => db.collection('groups').doc(g._id).remove()));
-        }
-      } catch (e) {
-        console.error('删除group失败:', e);
-      }
-
-      // 删除活动
-      await db.collection('activities').doc(activityId).remove();
+      await deleteActivityRecords(db, activityId);
 
       return { success: true };
     }
