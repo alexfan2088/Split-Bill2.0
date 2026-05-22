@@ -1,5 +1,6 @@
 // pages/bill/edit.js
 const db = require('../../utils/db.js');
+const { computeAmountFromInput } = require('../../utils/amountExpression.js');
 const app = getApp();
 
 Page({
@@ -489,7 +490,7 @@ Page({
   
   onAmountInput(e) {
     const raw = e.detail.value;
-    const computed = this.computeAmountFromInput(raw);
+    const computed = computeAmountFromInput(raw);
     if (computed !== null) {
       this.setData({ amount: computed });
       return;
@@ -497,46 +498,19 @@ Page({
     this.setData({ amount: raw });
   },
 
-  computeAmountFromInput(input) {
-    if (!input) return null;
-    const hasEqual = input.includes('=');
-    const expr = this.normalizeAmountExpression(input, hasEqual);
-    if (!expr) return null;
-    if (!this.shouldComputeExpression(expr, hasEqual)) return null;
-    const result = this.evaluateAmountExpression(expr);
-    if (result === null) return null;
-    return this.formatAmountResult(result);
+  onAmountConfirm(e) {
+    this.applyAmountFormula(e.detail.value);
   },
 
-  normalizeAmountExpression(input, hasEqual) {
-    const raw = hasEqual ? (input.split('=')[0] || '') : input;
-    const expr = raw.replace(/\s+/g, '');
-    if (!expr) return '';
-    if (!/^[0-9+\-*/().]+$/.test(expr)) return '';
-    if (/[+\-*/.]$/.test(expr)) return '';
-    return expr;
+  onAmountBlur(e) {
+    this.applyAmountFormula(e.detail.value);
   },
 
-  shouldComputeExpression(expr, hasEqual) {
-    if (hasEqual) return true;
-    if (/^[0-9]*\.?[0-9]+$/.test(expr)) return false;
-    const trimmed = expr.replace(/^\-/, '');
-    return /[+\-*/]/.test(trimmed);
-  },
-
-  evaluateAmountExpression(expr) {
-    try {
-      const result = Function(`"use strict"; return (${expr})`)();
-      if (typeof result !== 'number' || !Number.isFinite(result)) return null;
-      return result;
-    } catch (e) {
-      return null;
+  applyAmountFormula(value) {
+    const computed = computeAmountFromInput(value);
+    if (computed !== null) {
+      this.setData({ amount: computed });
     }
-  },
-
-  formatAmountResult(value) {
-    const fixed = value.toFixed(2);
-    return fixed.replace(/\.?0+$/, '');
   },
   
   selectTitle(e) {

@@ -12,6 +12,18 @@
       },
       {
         "type": "file",
+        "value": "*.md"
+      },
+      {
+        "type": "file",
+        "value": "*.docx"
+      },
+      {
+        "type": "file",
+        "value": "analyse-data.json"
+      },
+      {
+        "type": "file",
         "value": "utils/vconsole.min.js"
       }
     ],
