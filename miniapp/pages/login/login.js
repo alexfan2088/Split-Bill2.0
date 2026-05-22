@@ -6,11 +6,10 @@ Page({
   data: {
     userName: '',
     password: '',
-    realPassword: '', // 保存真实密码
     confirmPassword: '',
     showPassword: false,
     showConfirmPassword: false,
-    showPasswordText: false, // true: 显示真实密码, false: 显示星号
+    showPasswordText: false, // true: 明文显示输入框, false: 密码输入框
     statusText: '',
     statusTextColor: '',
     passwordErrorCount: {}, // 记录每个用户名的密码错误次数
@@ -38,22 +37,18 @@ Page({
     // 检查是否已保存用户信息
     const userName = wx.getStorageSync('aa_user_name');
     const savedPasswordHashed = wx.getStorageSync('aa_user_password');
-    const savedPasswordPlain = wx.getStorageSync('aa_user_password_plain');
     
     if (userName && savedPasswordHashed) {
-      // 有保存的用户名和密码，进入登录模式
-      const realPwd = savedPasswordPlain || '';
-      console.log('加载保存的密码 - realPwd:', realPwd ? '有密码' : '无密码');
+      // 有保存的用户名和密码哈希，进入登录模式
       this.setData({ 
         userName: userName,
-        password: '******', // 默认显示星号
-        realPassword: realPwd, // 保存真实密码
+        password: '',
         showPassword: true,
         showConfirmPassword: false,
-        showPasswordText: false, // 默认显示星号
+        showPasswordText: false,
         isRegisterMode: false, // 登录模式
         hasSavedUser: true,
-        statusText: '已保存用户信息，请输入密码登录',
+        statusText: '已保存用户信息，可直接登录或重新输入密码',
         statusTextColor: 'blue'
       });
     } else {
@@ -75,7 +70,6 @@ Page({
       isRegisterMode: true,
       userName: '',
       password: '',
-      realPassword: '',
       confirmPassword: '',
       showPassword: true,
       showConfirmPassword: true,
@@ -88,17 +82,15 @@ Page({
   // 切换到登录模式
   switchToLogin() {
     const userName = wx.getStorageSync('aa_user_name');
-    const savedPasswordPlain = wx.getStorageSync('aa_user_password_plain');
     
     this.setData({
       isRegisterMode: false,
       userName: userName || '',
-      password: savedPasswordPlain ? '******' : '',
-      realPassword: savedPasswordPlain || '',
+      password: '',
       showPassword: true,
       showConfirmPassword: false,
       showPasswordText: false,
-      statusText: userName ? '请输入密码登录' : '请输入用户名和密码登录',
+      statusText: userName ? '已保存用户信息，可直接登录或重新输入密码' : '请输入用户名和密码登录',
       statusTextColor: 'blue'
     });
   },
@@ -120,21 +112,7 @@ Page({
   },
   
   onPasswordInput(e) {
-    const inputValue = e.detail.value;
-    // 如果当前显示的是星号，用户输入时清空星号并显示真实密码
-    if (!this.data.showPasswordText && this.data.password === '******') {
-      this.setData({
-        password: inputValue,
-        realPassword: inputValue,
-        showPasswordText: true // 用户输入时自动显示真实密码
-      });
-    } else {
-      // 正常更新密码
-      this.setData({
-        password: inputValue,
-        realPassword: inputValue
-      });
-    }
+    this.setData({ password: e.detail.value });
   },
   
   onConfirmPasswordInput(e) {
@@ -142,27 +120,15 @@ Page({
   },
   
   togglePassword() {
-    const willShow = !this.data.showPasswordText;
-    // 获取真实密码（如果realPassword为空，尝试从本地存储获取）
-    let realPwd = this.data.realPassword;
-    if (!realPwd) {
-      realPwd = wx.getStorageSync('aa_user_password_plain') || '';
-    }
-    
-    console.log('切换密码显示 - willShow:', willShow, 'realPassword:', realPwd);
-    
-    // 切换显示/隐藏
     this.setData({
-      showPasswordText: willShow,
-      password: willShow ? realPwd : '******',
-      realPassword: realPwd // 确保realPassword有值
+      showPasswordText: !this.data.showPasswordText
     });
   },
   
   // 处理登录
   async handleLogin() {
     const userName = this.data.userName.trim();
-    const password = this.data.realPassword || this.data.password;
+    const password = this.data.password;
     
     if (!userName) {
       wx.showToast({
@@ -172,7 +138,11 @@ Page({
       return;
     }
     
-    if (!password) {
+    const savedUserName = wx.getStorageSync('aa_user_name') || '';
+    const savedPasswordHashed = wx.getStorageSync('aa_user_password') || '';
+    const canUseSavedPassword = savedUserName === userName && !!savedPasswordHashed;
+
+    if (!password && !canUseSavedPassword) {
       wx.showToast({
         title: '请输入密码',
         icon: 'none'
@@ -230,7 +200,6 @@ Page({
               this.setData({
                 passwordErrorCount,
                 password: '',
-                realPassword: '',
                 statusText: '密码错误3次，请检查用户名是否正确',
                 statusTextColor: 'red'
               });
@@ -245,7 +214,6 @@ Page({
           });
           this.setData({
             password: '',
-            realPassword: '',
             statusText: `密码错误，还可尝试 ${remaining} 次`,
             statusTextColor: 'red'
           });
@@ -392,8 +360,7 @@ Page({
   // 旧的handleLoginOrRegister函数（已废弃，保留以防万一）
   async handleLoginOrRegisterOld() {
     const userName = this.data.userName.trim();
-    // 使用真实密码进行登录/注册
-    const password = this.data.realPassword || this.data.password;
+    const password = this.data.password;
     const confirmPassword = this.data.confirmPassword;
     
     if (!userName) {
@@ -610,5 +577,4 @@ Page({
     }
   },
 });
-
 

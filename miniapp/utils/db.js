@@ -100,24 +100,16 @@ async function login(userName, password) {
     
     // 处理密码：检查本地存储的密码或使用输入的密码
     const savedPasswordHashed = wx.getStorageSync('aa_user_password') || '';
-    const savedPasswordPlain = wx.getStorageSync('aa_user_password_plain') || '';
     const savedUserName = wx.getStorageSync('aa_user_name') || '';
     
     let passwordToUse = null;
-    let plainPasswordToSave = null;
     
     if (!password && savedPasswordHashed && savedUserName === userName) {
       // 使用本地保存的哈希密码
       passwordToUse = savedPasswordHashed;
-      plainPasswordToSave = savedPasswordPlain;
-    } else if (password === savedPasswordPlain && savedPasswordPlain) {
-      // 用户输入的是保存的原始密码
-      passwordToUse = savedPasswordHashed;
-      plainPasswordToSave = savedPasswordPlain;
     } else if (password) {
       // 用户输入了新密码，需要哈希
       passwordToUse = hashPassword(password);
-      plainPasswordToSave = password;
     } else {
       return { success: false, error: '请输入密码', needPassword: true };
     }
@@ -129,9 +121,7 @@ async function login(userName, password) {
       // 保存到本地存储
       wx.setStorageSync('aa_user_name', userName);
       wx.setStorageSync('aa_user_password', passwordToUse);
-      if (plainPasswordToSave) {
-        wx.setStorageSync('aa_user_password_plain', plainPasswordToSave);
-      }
+      wx.removeStorageSync('aa_user_password_plain');
 
       // 记录最近一次登录时间（仅用于后台查看，不影响界面）
       try {
@@ -217,7 +207,7 @@ async function register(userName, password, confirmPassword) {
     // 保存到本地存储
     wx.setStorageSync('aa_user_name', userName);
     wx.setStorageSync('aa_user_password', hashedPassword);
-    wx.setStorageSync('aa_user_password_plain', password);
+    wx.removeStorageSync('aa_user_password_plain');
     
     return { success: true, userName };
   } catch (e) {
