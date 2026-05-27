@@ -7,6 +7,7 @@ cloud.init({
 
 const db = cloud.database();
 const { deleteActivityRecords } = require('./deleteActivityCore');
+const { getActivityDetail } = require('./getActivityDetailCore');
 
 // 密码哈希函数（与客户端保持一致）
 function hashPassword(password) {
@@ -277,6 +278,42 @@ exports.main = async (event) => {
   const { action } = event || {};
 
   try {
+    if (action === 'getActivityDetail') {
+      const { activityId, userName, passwordHash, password } = event;
+      const auth = await verifyUser(userName, passwordHash, password);
+      if (!auth.ok) {
+        return { success: false, error: auth.error };
+      }
+
+      return await getActivityDetail(db, activityId, userName);
+    }
+
+    if (action === 'deleteRecharge') {
+      const { rechargeId, userName, passwordHash, password } = event;
+      const auth = await verifyUser(userName, passwordHash, password);
+      if (!auth.ok) {
+        return { success: false, error: auth.error };
+      }
+      if (!rechargeId) {
+        return { success: false, error: '缺少充值记录ID' };
+      }
+
+      const rechargeDoc = await db.collection('recharges').doc(rechargeId).get();
+      const recharge = rechargeDoc.data;
+      if (!recharge) {
+        return { success: false, error: '充值记录不存在' };
+      }
+      if (recharge.isAuto) {
+        return { success: false, error: '自动生成的充值记录不可删除' };
+      }
+      if (recharge.creator !== userName) {
+        return { success: false, error: '只有创建者可以删除' };
+      }
+
+      await db.collection('recharges').doc(rechargeId).remove();
+      return { success: true };
+    }
+
     if (action === 'updateActivity') {
       const {
         activityId,

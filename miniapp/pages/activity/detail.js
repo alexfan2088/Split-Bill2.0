@@ -87,138 +87,38 @@ Page({
     wx.showLoading({ title: '加载中...' });
     
     try {
-      const dbCloud = wx.cloud.database();
       const activityId = this.data.activityId;
-      
-      // 加载活动信息
-      const actRes = await dbCloud.collection('activities').doc(activityId).get();
-      const activity = actRes.data;
-      
-      // 调试：打印isPrepaid值
-      console.log('活动 isPrepaid 值:', activity.isPrepaid, typeof activity.isPrepaid);
-      
-      // 加载活动的group（获取最新成员列表）
-      const groupRes = await dbCloud.collection('groups')
-        .where({ activityId: activityId })
-        .limit(1)
-        .get();
-      
-      if (groupRes.data && groupRes.data.length > 0) {
-        activity.members = groupRes.data[0].members;
-      }
-      
-      const activityMeta = (activity.type || '') + ' | 成员：' + (activity.members || []).map(m => m.name).join('、');
-      
-      // 加载账单列表（小程序云数据库默认限制20条，需要分页查询获取所有数据）
-      let bills = [];
-      const MAX_LIMIT = 20; // 小程序云数据库单次查询最大限制
-      let hasMore = true;
-      let skip = 0;
-      
-      // 尝试使用 time 字段排序，如果失败则使用 createdAt
-      let orderByField = 'time';
-      let useOrderBy = true;
-      
-      while (hasMore) {
-        try {
-          let billsRes;
-          if (useOrderBy) {
-            // 使用排序查询（skip需要配合orderBy使用）
-            billsRes = await dbCloud.collection('bills')
-              .where({ activityId: activityId })
-              .orderBy(orderByField, 'desc')
-              .skip(skip)
-              .limit(MAX_LIMIT)
-              .get();
-          } else {
-            // 如果不使用排序，直接查询（但只能获取前20条）
-            if (skip === 0) {
-              billsRes = await dbCloud.collection('bills')
-                .where({ activityId: activityId })
-                .get();
-            } else {
-              // 如果skip > 0但没有排序，无法继续查询
-              hasMore = false;
-              break;
-            }
-          }
-          
-          const currentBills = billsRes.data || [];
-          bills = bills.concat(currentBills);
-          
-          // 如果返回的数据少于MAX_LIMIT，说明已经获取完所有数据
-          if (currentBills.length < MAX_LIMIT) {
-            hasMore = false;
-          } else {
-            skip += MAX_LIMIT;
-          }
-        } catch (e) {
-          // 如果排序字段不存在或没有索引，尝试使用createdAt
-          if (useOrderBy && orderByField === 'time') {
-            console.log('time字段排序失败，尝试使用createdAt:', e);
-            orderByField = 'createdAt';
-            skip = 0; // 重置skip，重新开始查询
-            bills = []; // 清空已获取的数据
-            continue;
-          } else if (useOrderBy && orderByField === 'createdAt') {
-            // createdAt也失败，尝试不使用排序（但只能获取前20条）
-            console.log('createdAt字段排序也失败，尝试不使用排序:', e);
-            useOrderBy = false;
-            skip = 0;
-            bills = [];
-            continue;
-          } else {
-            // 所有方式都失败，跳出循环
-            console.error('获取账单列表失败:', e);
-            hasMore = false;
-          }
-        }
-      }
-      
-      // 如果使用了排序，数据已经按时间排序；如果没有使用排序，需要手动排序
-      if (!useOrderBy || bills.length > 0) {
-        bills = bills.sort((a, b) => {
-          const getDate = (bill) => {
-            if (bill.time) {
-              return bill.time.getTime ? bill.time.getTime() : new Date(bill.time).getTime();
-            }
-            if (bill.createdAt) {
-              return bill.createdAt.getTime ? bill.createdAt.getTime() : new Date(bill.createdAt).getTime();
-            }
-            return 0;
-          };
-          return getDate(b) - getDate(a); // 从最近到最远
-        });
-      }
-      
-      // 处理账单数据，生成圆圈和显示信息
       const userName = db.getCurrentUser();
-      const isActivityCreator = activity.creator === userName;
-      
-      // 如果是预存活动，先加载充值记录，以便从关联的充值记录中获取原始付款人
-      let rechargeMap = {}; // 用于快速查找充值记录
-      if (activity.isPrepaid) {
-        try {
-          const dbCloud = wx.cloud.database();
-          const rechargesRes = await dbCloud.collection('recharges')
-            .where({ activityId: activityId })
-            .get();
-          const recharges = rechargesRes.data || [];
-          // 建立账单ID到充值记录的映射（通过relatedRechargeId）
-          recharges.forEach(r => {
-            // 通过relatedRechargeId反向查找账单
-            // 但这里我们需要在后续处理中通过relatedRechargeId查找
-          });
-          // 建立充值记录ID到充值记录的映射
-          recharges.forEach(r => {
-            if (r._id) {
-              rechargeMap[r._id] = r;
-            }
-          });
-        } catch (e) {
-          console.error('加载充值记录失败（用于获取原始付款人）:', e);
-        }
+      const passwordHash = db.getCurrentUserPasswordHash();
+      if (!userName || !passwordHash) {
+        throw new Error('请先登录');
       }
+
+      const detailRes = await wx.cloud.callFunction({
+        name: 'activityOps',
+        data: {
+          action: 'getActivityDetail',
+          activityId,
+          userName,
+          passwordHash
+        }
+      });
+      const detail = (detailRes && detailRes.result) || {};
+      if (!detail.success) {
+        throw new Error(detail.error || '加载活动数据失败');
+      }
+
+      const activity = detail.activity;
+      const bills = detail.bills || [];
+      const recharges = activity.isPrepaid ? (detail.recharges || []) : [];
+      const activityMeta = (activity.type || '') + ' | 成员：' + (activity.members || []).map(m => m.name).join('、');
+      const isActivityCreator = activity.creator === userName;
+      const rechargeMap = {};
+      recharges.forEach(r => {
+        if (r._id) {
+          rechargeMap[r._id] = r;
+        }
+      });
       
       const processedBills = bills.map((bill, billIndex) => {
         const circles = this.generateCircles(bill);
@@ -258,49 +158,12 @@ Page({
         };
       });
       
-      // 计算余额
-      // 如果是预存活动，需要传入充值数据
-      let balances = {};
-      if (activity.isPrepaid) {
-        // 先加载充值数据
-        try {
-          const dbCloud = wx.cloud.database();
-          let rechargesRes;
-          try {
-            rechargesRes = await dbCloud.collection('recharges')
-              .where({ activityId: activityId })
-              .orderBy('date', 'desc')
-              .get();
-          } catch (e) {
-            try {
-              rechargesRes = await dbCloud.collection('recharges')
-                .where({ activityId: activityId })
-                .orderBy('createdAt', 'desc')
-                .get();
-            } catch (e2) {
-              // 如果createdAt也没有索引，尝试不使用排序
-              console.log('结算计算 - 尝试不使用排序:', e2);
-              try {
-                rechargesRes = await dbCloud.collection('recharges')
-                  .where({ activityId: activityId })
-                  .get();
-              } catch (e3) {
-                console.error('结算计算 - 加载充值记录失败（可能是权限问题）:', e3);
-                rechargesRes = { data: [] };
-              }
-            }
-          }
-          const recharges = rechargesRes.data || [];
-          console.log('结算计算使用的充值记录数量:', recharges.length);
-          console.log('结算计算使用的充值记录:', recharges.map(r => ({ payer: r.payer, amount: r.amount })));
-          balances = this.calcBalances(activity.members || [], bills, recharges, activity.keeper);
-        } catch (e) {
-          console.error('加载充值数据失败:', e);
-          balances = this.calcBalances(activity.members || [], bills, [], activity.keeper);
-        }
-      } else {
-        balances = this.calcBalances(activity.members || [], bills, [], '');
-      }
+      const balances = this.calcBalances(
+        activity.members || [],
+        bills,
+        recharges,
+        activity.isPrepaid ? activity.keeper : ''
+      );
       
       // 计算总支出和人均
       const total = bills.reduce((sum, b) => sum + (Number(b.amount) || 0), 0);
@@ -387,136 +250,9 @@ Page({
       // 建议下一次买单人员（余额最小的成员）
       const suggestionMember = this.getSuggestionMember(balances);
       
-      // 如果是预存活动，加载充值数据
-      let recharges = [];
-      let totalRecharge = 0;
+      let totalRecharge = recharges.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
       let totalConsume = total;
-      let remaining = 0;
-      
-      if (activity.isPrepaid) {
-        try {
-          const dbCloud = wx.cloud.database();
-          console.log('🔍 开始查询充值记录，activityId:', activityId);
-          
-          let rechargesRes;
-          let queryError = null;
-          
-          try {
-            // 尝试使用date字段排序
-            console.log('📅 尝试使用date字段排序查询...');
-            rechargesRes = await dbCloud.collection('recharges')
-              .where({ activityId: activityId })
-              .orderBy('date', 'desc')
-              .get();
-            console.log('✅ 查询成功，返回数据:', rechargesRes);
-          } catch (e) {
-            queryError = e;
-            console.log('⚠️ date字段排序失败，错误:', e);
-            console.log('错误码:', e.errCode, '错误信息:', e.errMsg);
-            
-            // 如果date字段没有索引，使用createdAt排序
-            try {
-              console.log('📅 尝试使用createdAt排序查询...');
-              rechargesRes = await dbCloud.collection('recharges')
-                .where({ activityId: activityId })
-                .orderBy('createdAt', 'desc')
-                .get();
-              console.log('✅ 查询成功，返回数据:', rechargesRes);
-            } catch (e2) {
-              queryError = e2;
-              console.log('⚠️ createdAt排序也失败，错误:', e2);
-              console.log('错误码:', e2.errCode, '错误信息:', e2.errMsg);
-              
-              // 如果createdAt也没有索引，尝试不使用排序
-              try {
-                console.log('📅 尝试不使用排序查询...');
-                rechargesRes = await dbCloud.collection('recharges')
-                  .where({ activityId: activityId })
-                  .get();
-                console.log('✅ 查询成功，返回数据:', rechargesRes);
-              } catch (e3) {
-                queryError = e3;
-                console.error('❌ 所有查询方式都失败:', e3);
-                console.error('错误码:', e3.errCode, '错误信息:', e3.errMsg);
-                wx.showToast({
-                  title: '加载充值记录失败，请检查数据库权限',
-                  icon: 'none',
-                  duration: 3000
-                });
-                rechargesRes = { data: [] };
-              }
-            }
-          }
-          
-          recharges = rechargesRes.data || [];
-          
-          console.log('📊 查询结果统计:');
-          console.log('  - 加载的充值记录数量:', recharges.length);
-          console.log('  - 返回的原始数据:', rechargesRes);
-          console.log('  - 充值记录详情:', recharges.map(r => ({ 
-            _id: r._id, 
-            payer: r.payer, 
-            amount: r.amount, 
-            creator: r.creator, 
-            recorder: r.recorder,
-            activityId: r.activityId
-          })));
-          
-          // 如果充值记录数量为0，但活动是预存，可能是权限问题
-          if (recharges.length === 0 && activity.isPrepaid) {
-            console.warn('⚠️ 警告：预存活动但没有充值记录！');
-            console.warn('可能的原因：');
-            console.warn('  1. 数据库权限问题 - recharges集合可能设置为"仅创建者可读"');
-            console.warn('  2. 确实没有充值记录');
-            console.warn('  3. activityId不匹配');
-            console.warn('当前查询的activityId:', activityId);
-            
-            // 尝试查询所有充值记录（不限制activityId）来测试权限
-            try {
-              console.log('🔍 测试：尝试查询所有充值记录（测试权限）...');
-              const testRes = await dbCloud.collection('recharges').limit(1).get();
-              console.log('✅ 权限测试结果 - 可以查询，返回:', testRes.data?.length || 0, '条记录');
-            } catch (testErr) {
-              console.error('❌ 权限测试失败:', testErr);
-              console.error('这确认了是数据库权限问题！');
-            }
-          }
-          
-          // 如果没有排序，手动按日期倒序排序
-          if (recharges.length > 0) {
-            recharges.sort((a, b) => {
-              const dateA = a.date ? (a.date.getTime ? a.date.getTime() : new Date(a.date).getTime()) : 
-                           (a.createdAt ? (a.createdAt.getTime ? a.createdAt.getTime() : new Date(a.createdAt).getTime()) : 0);
-              const dateB = b.date ? (b.date.getTime ? b.date.getTime() : new Date(b.date).getTime()) : 
-                           (b.createdAt ? (b.createdAt.getTime ? b.createdAt.getTime() : new Date(b.createdAt).getTime()) : 0);
-              return dateB - dateA; // 倒序
-            });
-          }
-          
-          // 计算充值总金额（所有充值记录的总和）
-          totalRecharge = recharges.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
-          console.log('充值总金额:', totalRecharge);
-          
-          // 计算剩余金额
-          remaining = totalRecharge - totalConsume;
-        } catch (e) {
-          console.error('加载充值数据失败:', e);
-          console.error('错误详情:', {
-            message: e.message,
-            errCode: e.errCode,
-            errMsg: e.errMsg
-          });
-          
-          // 如果是权限错误，提示用户
-          if (e.errCode === -601034 || e.errMsg && e.errMsg.includes('权限')) {
-            wx.showToast({
-              title: '数据库权限不足，请检查recharges集合权限设置',
-              icon: 'none',
-              duration: 3000
-            });
-          }
-        }
-      }
+      let remaining = activity.isPrepaid ? totalRecharge - totalConsume : 0;
       
       this.setData({
         activity,
@@ -2400,13 +2136,24 @@ Page({
         if (res.confirm) {
           wx.showLoading({ title: '删除中...' });
           try {
-            console.log('🗑️ 开始删除充值记录，rechargeId:', rechargeId);
-            console.log('当前用户:', userName, '创建者:', recharge.creator);
-            
-            const dbCloud = wx.cloud.database();
-            await dbCloud.collection('recharges').doc(rechargeId).remove();
-            
-            console.log('✅ 删除成功');
+            const passwordHash = db.getCurrentUserPasswordHash();
+            if (!passwordHash) {
+              throw new Error('请先登录');
+            }
+            const res = await wx.cloud.callFunction({
+              name: 'activityOps',
+              data: {
+                action: 'deleteRecharge',
+                rechargeId,
+                userName,
+                passwordHash
+              }
+            });
+            const result = (res && res.result) || {};
+            if (!result.success) {
+              throw new Error(result.error || '删除失败');
+            }
+
             wx.hideLoading();
             wx.showToast({
               title: '删除成功',
@@ -2414,20 +2161,10 @@ Page({
             });
             this.loadActivityData();
           } catch (e) {
-            console.error('❌ 删除失败:', e);
-            console.error('错误码:', e.errCode, '错误信息:', e.errMsg);
+            console.error('删除充值记录失败:', e);
             wx.hideLoading();
-            
-            // 根据错误类型显示不同的提示
-            let errorMsg = '删除失败';
-            if (e.errCode === -601034 || (e.errMsg && e.errMsg.includes('权限'))) {
-              errorMsg = '删除失败：数据库权限不足，请检查recharges集合的删除权限设置';
-            } else if (e.errMsg) {
-              errorMsg = `删除失败：${e.errMsg}`;
-            }
-            
             wx.showToast({
-              title: errorMsg,
+              title: e.message || '删除失败',
               icon: 'none',
               duration: 3000
             });
