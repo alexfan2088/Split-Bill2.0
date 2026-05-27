@@ -68,6 +68,49 @@ function getCurrentUserPasswordHash() {
   return wx.getStorageSync('aa_user_password') || '';
 }
 
+// 历史密码值使用可逆 Base64 编码保存，供登录页回填已有凭据。
+function decodeStoredPassword(encodedPassword) {
+  if (!encodedPassword) {
+    return '';
+  }
+
+  try {
+    const base64Chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    const bytes = [];
+    let bitmap = 0;
+    let bits = 0;
+
+    for (let i = 0; i < encodedPassword.length; i++) {
+      const char = encodedPassword.charAt(i);
+      if (char === '=') {
+        break;
+      }
+
+      const value = base64Chars.indexOf(char);
+      if (value < 0) {
+        return '';
+      }
+
+      bitmap = (bitmap << 6) | value;
+      bits += 6;
+      if (bits >= 8) {
+        bits -= 8;
+        bytes.push((bitmap >> bits) & 0xff);
+      }
+    }
+
+    const encodedUtf8 = bytes.map(byte => `%${byte.toString(16).padStart(2, '0')}`).join('');
+    return decodeURIComponent(encodedUtf8);
+  } catch (e) {
+    return '';
+  }
+}
+
+function getSavedLoginPassword() {
+  const savedPlainPassword = wx.getStorageSync('aa_user_password_plain') || '';
+  return savedPlainPassword || decodeStoredPassword(getCurrentUserPasswordHash());
+}
+
 async function fetchAll(collection, query, options = {}) {
   const limit = options.limit || 20;
   let all = [];
@@ -150,7 +193,7 @@ async function login(userName, password) {
       // 保存到本地存储
       wx.setStorageSync('aa_user_name', userName);
       wx.setStorageSync('aa_user_password', passwordToUse);
-      wx.removeStorageSync('aa_user_password_plain');
+      wx.setStorageSync('aa_user_password_plain', password);
 
       // 记录最近一次登录时间（仅用于后台查看，不影响界面）
       try {
@@ -236,7 +279,7 @@ async function register(userName, password, confirmPassword) {
     // 保存到本地存储
     wx.setStorageSync('aa_user_name', userName);
     wx.setStorageSync('aa_user_password', hashedPassword);
-    wx.removeStorageSync('aa_user_password_plain');
+    wx.setStorageSync('aa_user_password_plain', password);
     
     return { success: true, userName };
   } catch (e) {
@@ -408,6 +451,7 @@ async function deleteRecharge(rechargeId) {
 module.exports = {
   getCurrentUser,
   getCurrentUserPasswordHash,
+  getSavedLoginPassword,
   hashPassword,
   login,
   register,

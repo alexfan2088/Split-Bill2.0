@@ -37,18 +37,19 @@ Page({
     // 检查是否已保存用户信息
     const userName = wx.getStorageSync('aa_user_name');
     const savedPasswordHashed = wx.getStorageSync('aa_user_password');
+    const savedPassword = db.getSavedLoginPassword();
     
     if (userName && savedPasswordHashed) {
-      // 有保存的用户名和密码哈希，进入登录模式
+      // 有保存的登录凭据，默认隐藏回填的密码。
       this.setData({ 
         userName: userName,
-        password: '',
+        password: savedPassword,
         showPassword: true,
         showConfirmPassword: false,
         showPasswordText: false,
         isRegisterMode: false, // 登录模式
         hasSavedUser: true,
-        statusText: '已保存用户名，请输入密码登录',
+        statusText: savedPassword ? '已自动填入保存的密码' : '已保存用户名，请输入密码登录',
         statusTextColor: 'blue'
       });
     } else {
@@ -82,15 +83,16 @@ Page({
   // 切换到登录模式
   switchToLogin() {
     const userName = wx.getStorageSync('aa_user_name');
+    const savedPassword = db.getSavedLoginPassword();
     
     this.setData({
       isRegisterMode: false,
       userName: userName || '',
-      password: '',
+      password: userName ? savedPassword : '',
       showPassword: true,
       showConfirmPassword: false,
       showPasswordText: false,
-      statusText: userName ? '已保存用户名，请输入密码登录' : '请输入用户名和密码登录',
+      statusText: userName && savedPassword ? '已自动填入保存的密码' : (userName ? '已保存用户名，请输入密码登录' : '请输入用户名和密码登录'),
       statusTextColor: 'blue'
     });
   },
