@@ -1,7 +1,7 @@
 <!--pages/login/login.wxml-->
 <view class="container">
   <view class="login-card">
-    <view class="title">AA 记账2.4.5</view>
+    <view class="title">AA 记账2.4.501</view>
     <view class="subtitle">题名登塔喜，醵宴为花忙</view>
     
     <view class="form">
