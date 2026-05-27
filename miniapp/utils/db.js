@@ -113,6 +113,10 @@ async function login(userName, password) {
     if (!wx.cloud) {
       throw new Error('云开发未初始化，请检查 app.js 中的云开发配置');
     }
+
+    if (!password) {
+      return { success: false, error: '请输入密码', needPassword: true };
+    }
     
     // 检查用户是否存在
     // 添加更详细的错误处理
@@ -137,21 +141,7 @@ async function login(userName, password) {
     
     const existingUser = userRes.data[0];
     
-    // 处理密码：检查本地存储的密码或使用输入的密码
-    const savedPasswordHashed = wx.getStorageSync('aa_user_password') || '';
-    const savedUserName = wx.getStorageSync('aa_user_name') || '';
-    
-    let passwordToUse = null;
-    
-    if (!password && savedPasswordHashed && savedUserName === userName) {
-      // 使用本地保存的哈希密码
-      passwordToUse = savedPasswordHashed;
-    } else if (password) {
-      // 用户输入了新密码，需要哈希
-      passwordToUse = hashPassword(password);
-    } else {
-      return { success: false, error: '请输入密码', needPassword: true };
-    }
+    const passwordToUse = hashPassword(password);
     
     // 验证密码
     if (existingUser.password === passwordToUse) {

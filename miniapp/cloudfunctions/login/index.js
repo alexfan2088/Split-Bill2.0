@@ -69,6 +69,14 @@ exports.main = async (event, context) => {
     
     if (action === 'login') {
       // 登录：验证密码
+      if (!password) {
+        return {
+          success: false,
+          error: '请输入密码',
+          needPassword: true
+        };
+      }
+
       const userRes = await db.collection('users')
         .where({ name: userName })
         .limit(1)
@@ -172,4 +180,3 @@ exports.main = async (event, context) => {
     };
   }
 };
-

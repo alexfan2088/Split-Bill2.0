@@ -48,7 +48,7 @@ Page({
         showPasswordText: false,
         isRegisterMode: false, // 登录模式
         hasSavedUser: true,
-        statusText: '已保存用户信息，可直接登录或重新输入密码',
+        statusText: '已保存用户名，请输入密码登录',
         statusTextColor: 'blue'
       });
     } else {
@@ -90,7 +90,7 @@ Page({
       showPassword: true,
       showConfirmPassword: false,
       showPasswordText: false,
-      statusText: userName ? '已保存用户信息，可直接登录或重新输入密码' : '请输入用户名和密码登录',
+      statusText: userName ? '已保存用户名，请输入密码登录' : '请输入用户名和密码登录',
       statusTextColor: 'blue'
     });
   },
@@ -138,11 +138,7 @@ Page({
       return;
     }
     
-    const savedUserName = wx.getStorageSync('aa_user_name') || '';
-    const savedPasswordHashed = wx.getStorageSync('aa_user_password') || '';
-    const canUseSavedPassword = savedUserName === userName && !!savedPasswordHashed;
-
-    if (!password && !canUseSavedPassword) {
+    if (!password) {
       wx.showToast({
         title: '请输入密码',
         icon: 'none'
@@ -577,4 +573,3 @@ Page({
     }
   },
 });
-
