@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+LABEL="com.alexfan.ai-daily"
+SRC="/Users/fwp-mac/dev/Split-Bill2.0/miniapp/tools/ai_daily/${LABEL}.plist"
+DST="${HOME}/Library/LaunchAgents/${LABEL}.plist"
+
+mkdir -p "${HOME}/Library/LaunchAgents" "${HOME}/Library/Logs" "${HOME}/.codex/ai_daily/out"
+chmod +x "/Users/fwp-mac/dev/Split-Bill2.0/miniapp/tools/ai_daily/ai_daily.py"
+plutil -lint "${SRC}"
+cp "${SRC}" "${DST}"
+chmod 644 "${DST}"
+
+launchctl bootout "gui/$(id -u)" "${DST}" >/dev/null 2>&1 || true
+launchctl bootstrap "gui/$(id -u)" "${DST}"
+launchctl enable "gui/$(id -u)/${LABEL}"
+launchctl print "gui/$(id -u)/${LABEL}" | sed -n '1,80p'
