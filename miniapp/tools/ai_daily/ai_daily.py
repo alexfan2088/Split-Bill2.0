@@ -27,7 +27,6 @@ RECIPIENTS = [
     "1394628250@qq.com",
     "1347191150@qq.com",
     "376622979@qq.com",
-    "fanjy12@chinatelecom.cn",
     "hruicn@gmail.com",
     "rocket.tang@163.com",
 ]
@@ -600,13 +599,15 @@ end tell
 delay 8
 set bodyText to read POSIX file "{escaped_path}" as «class utf8»
 set the clipboard to bodyText
-tell application "System Events"
-  set frontmost of process "Google Chrome" to true
-  delay 1
-  keystroke "v" using {{command down}}
-  delay 2
-  key code 36 using {{command down}}
-end tell
+with timeout of 300 seconds
+  tell application "System Events"
+    set frontmost of process "Google Chrome" to true
+    delay 1
+    keystroke "v" using {{command down}}
+    delay 2
+    key code 36 using {{command down}}
+  end tell
+end timeout
 delay 5
 '''
     run_osascript(script)
