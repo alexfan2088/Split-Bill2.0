@@ -80,6 +80,89 @@ COMPANY_KEYWORDS = [
     "1x",
 ]
 
+GLOSSARY_TERMS = [
+    {
+        "term": "模型治理",
+        "aliases": ["model governance", "governance", "治理", "合规", "安全"],
+        "body": [
+            "模型治理就是管理 AI 模型从设计、训练、上线、使用到下线的全过程。",
+            "通俗说，不是只看模型会不会回答，而是要管它能不能安全用、谁能用、用在哪里、出了问题谁负责、数据有没有泄露、结果能不能追溯。",
+            "例如企业用了一个 AI 客服模型，模型治理要管：训练数据是否合法、有没有客户隐私；模型会不会泄露内部资料；回答准确率和幻觉率怎么样；哪些员工能调用；能不能访问敏感系统；谁问了什么、模型答了什么、日志能不能查；模型出错后怎么回滚、降级和人工接管。",
+            "生活类比：模型就像一个新员工，模型治理就是公司的制度、权限、考核、监督和问责机制。",
+        ],
+    },
+    {
+        "term": "Gemini Flash",
+        "aliases": ["gemini flash", "gemini", "flash"],
+        "body": [
+            "Gemini Flash 是 Google Gemini 系列里偏速度和成本效率的模型路线，通常适合高频调用、长流程任务、Agent、代码和文档处理等场景。",
+            "你可以把它理解为一个又快又省钱、适合干活的 AI 大脑。它不一定在每个难题上都比旗舰模型强，但在响应速度、调用成本和规模化使用上更适合产品落地。",
+            "它常见的使用场景包括：快速总结大量文档、辅助写代码、处理客服和运营任务、调用工具完成多步骤流程，以及作为 Agent 系统里的执行型模型。",
+            "生活类比：Pro 模型像顶级专家，Flash 模型像效率很高的高级工程师，不一定每个问题都最强，但能又快又稳地处理大量工作。",
+        ],
+    },
+    {
+        "term": "Agent",
+        "aliases": ["agent", "agents", "智能体", "agentic"],
+        "body": [
+            "Agent 可以翻译成智能体，意思是一个不只会回答问题，还能围绕目标持续执行任务的 AI 系统。",
+            "普通聊天机器人通常是你问一句、它答一句；Agent 则可以自己拆解任务、调用工具、读取文件、浏览网页、写代码、运行命令、检查结果，然后继续下一步。",
+            "一个典型 Agent 系统通常包含：大模型大脑、工具调用能力、记忆或状态、权限控制、任务规划、执行环境和日志审计。",
+            "生活类比：普通 AI 像顾问，Agent 像助理。顾问给建议，助理会拿着目标去查资料、填表、发邮件、跑流程，并把结果交回来。",
+        ],
+    },
+    {
+        "term": "Managed Agents",
+        "aliases": ["managed agents", "托管智能体", "managed agent"],
+        "body": [
+            "Managed Agents 可以翻译为托管智能体，意思是平台已经帮你把 Agent 的运行环境搭好。",
+            "你不用自己配置服务器、文件系统、沙箱、工具权限、状态保存和日志系统，只需要告诉 Agent 要完成什么任务，以及允许它使用哪些工具和数据。",
+            "它通常包含模型、工具调用、文件系统、沙箱环境、状态管理、权限控制、版本管理和日志审计。",
+            "生活类比：自己做 Agent 像自己招人、租办公室、买电脑、装软件；Managed Agents 像平台已经提供办公区和电脑，你只需要告诉 AI 员工干什么。",
+        ],
+    },
+    {
+        "term": "AI Search",
+        "aliases": ["ai search", "search", "ai mode", "搜索"],
+        "body": [
+            "AI Search 就是用 AI 改造搜索。",
+            "传统搜索是你输入关键词，搜索引擎返回一堆网页链接；AI Search 是你输入问题，AI 先理解问题，再搜索和读取资料，最后直接整理出答案，还能继续追问。",
+            "例如你问 6 月去新疆自驾，那拉提、赛里木湖、独库公路怎么预约，传统搜索会给很多网页；AI Search 会尝试直接整理预约入口、预约时间、自驾限制和注意事项。",
+            "它的风险也很明显：可能总结错、漏掉来源、过度个性化，或者影响原网页流量。所以好的 AI Search 必须保留出处链接和可核查信息。",
+        ],
+    },
+    {
+        "term": "token",
+        "aliases": ["token", "tokens", "上下文", "context"],
+        "body": [
+            "token 是大模型处理文字的基本单位。它不严格等于字，也不严格等于词。",
+            "中文里，一个汉字可能接近一个 token；英文里，一个单词可能被拆成一个或多个 token。模型会先把文字切成 token，再进行计算。",
+            "token 主要影响三件事：上下文长度，也就是模型一次能读多少内容；费用，也就是 API 通常按输入和输出 token 收费；速度，也就是 token 越多处理越慢、成本越高。",
+            "一句话总结：token 是 AI 的文字燃料；上下文窗口是 AI 一次能装多少燃料和材料；价格通常按消耗多少 token 计算。",
+        ],
+    },
+    {
+        "term": "大模型上下文窗口",
+        "aliases": ["context window", "上下文窗口", "100万 token", "million token"],
+        "body": [
+            "上下文窗口指模型一次能读进去并用于思考的内容长度。",
+            "如果上下文窗口很小，模型只能看短对话或短文档；如果上下文窗口很大，模型就能同时处理长报告、代码库、多份合同或连续对话记录。",
+            "但上下文越大不代表一定越好。内容越多，费用和延迟通常越高，也更考验模型能不能从大量材料里抓住真正重要的信息。",
+            "生活类比：上下文窗口像办公桌。桌子越大，可以同时摊开的资料越多；但资料太乱，哪怕桌子很大，也可能找不到重点。",
+        ],
+    },
+    {
+        "term": "机器人基础模型",
+        "aliases": ["robotics foundation model", "robot foundation model", "机器人", "humanoid", "physical ai", "具身智能"],
+        "body": [
+            "机器人基础模型是把大模型能力用于物理世界的模型，让机器人理解环境、规划动作、操作物体并适应新任务。",
+            "传统机器人常常为某个固定动作写死程序，例如抓取、搬运、焊接；机器人基础模型希望机器人能通过视觉、语言和动作数据学习，面对新物体和新环境也能完成任务。",
+            "它通常需要仿真训练、真实机器人数据、视觉模型、动作控制模型和安全机制一起配合。",
+            "生活类比：传统机器人像只会一道菜的机器厨师；机器人基础模型像受过训练的学徒，能看菜谱、观察食材、试着调整步骤，但还需要监督和安全限制。",
+        ],
+    },
+]
+
 
 def log(message: str) -> None:
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -375,6 +458,33 @@ def chinese_summary(item: dict, index: int) -> str:
     return f"{base} 目前公开标题为“{title}”，来源为 {source}，后续需要继续观察官方公告、客户案例和行业复盘。"
 
 
+def select_glossary_terms(items: list[dict]) -> list[dict]:
+    text = " ".join(f"{item.get('title', '')} {item.get('summary', '')}" for item in items).lower()
+    ranked = []
+    for index, entry in enumerate(GLOSSARY_TERMS):
+        score = 0
+        for alias in entry["aliases"]:
+            if alias.lower() in text:
+                score += 1
+        ranked.append((score, -index, entry))
+    ranked.sort(reverse=True)
+    selected = [entry for score, _, entry in ranked if score > 0][:3]
+    for entry in GLOSSARY_TERMS:
+        if len(selected) >= 3:
+            break
+        if entry not in selected:
+            selected.append(entry)
+    return selected[:3]
+
+
+def glossary_lines(items: list[dict]) -> list[str]:
+    lines = ["", "每日名词："]
+    for index, entry in enumerate(select_glossary_terms(items), 1):
+        lines.extend(["", f"{index}. {entry['term']}"])
+        lines.extend(entry["body"])
+    return lines
+
+
 def build_body(items: list[dict]) -> str:
     today = dt.datetime.now().strftime("%Y-%m-%d")
     intro = (
@@ -406,6 +516,7 @@ def build_body(items: list[dict]) -> str:
             "AI 竞争正在从单点模型能力转向系统能力。每天真正值得盯的，不只是某个模型又刷新了哪个榜单，而是谁能把 AI 稳定地接入真实业务、真实设备和真实收入。后续如果某条新闻连续多天发酵，本邮件会优先追踪新增信息，避免重复搬运同一条旧链接。",
         ]
     )
+    lines.extend(glossary_lines(items))
     return "\n".join(lines)
 
 
