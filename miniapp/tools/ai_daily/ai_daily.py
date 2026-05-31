@@ -28,6 +28,8 @@ RECIPIENTS = [
     "1347191150@qq.com",
     "376622979@qq.com",
     "fanjy12@chinatelecom.cn",
+    "hruicn@gmail.com",
+    "rocket.tang@163.com",
 ]
 SUBJECT = "AI 日日观"
 
