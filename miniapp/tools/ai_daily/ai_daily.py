@@ -23,7 +23,12 @@ ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = Path.home() / ".codex" / "ai_daily"
 OUT_DIR = DATA_DIR / "out"
 STATE_PATH = DATA_DIR / "sent_urls.json"
-RECIPIENTS = ["alexfan2088@gmail.com", "1394628250@qq.com"]
+RECIPIENTS = [
+    "1394628250@qq.com",
+    "1347191150@qq.com",
+    "376622979@qq.com",
+    "fanjy12@chinatelecom.cn",
+]
 SUBJECT = "AI 日日观"
 
 FEEDS = [
