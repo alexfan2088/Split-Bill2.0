@@ -31,6 +31,7 @@ RECIPIENTS = [
     "hruicn@gmail.com",
     "rocket.tang@163.com",
 ]
+TEST_RECIPIENTS = ["1394628250@qq.com"]
 SUBJECT = "AI 日日观"
 
 FEEDS = [
@@ -571,11 +572,11 @@ def build_body(items: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def compose_gmail_url() -> str:
+def compose_gmail_url(recipients: list[str]) -> str:
     params = {
         "view": "cm",
         "fs": "1",
-        "to": ",".join(RECIPIENTS),
+        "to": ",".join(recipients),
         "su": SUBJECT,
     }
     return "https://mail.google.com/mail/?" + urllib.parse.urlencode(params)
@@ -587,8 +588,31 @@ def run_osascript(script: str) -> None:
         raise RuntimeError(result.stderr.strip() or result.stdout.strip())
 
 
-def send_via_gmail(body_path: Path) -> None:
-    url = compose_gmail_url()
+def applescript_string(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def send_via_mail(body_path: Path, recipients: list[str]) -> None:
+    escaped_path = str(body_path).replace('"', '\\"')
+    recipient_lines = "\n".join(
+        f"    make new to recipient at end of to recipients with properties {{address:{applescript_string(address)}}}"
+        for address in recipients
+    )
+    script = f'''
+set bodyText to read POSIX file "{escaped_path}" as «class utf8»
+tell application "Mail"
+  set newMessage to make new outgoing message with properties {{subject:{applescript_string(SUBJECT)}, content:bodyText, visible:false}}
+  tell newMessage
+{recipient_lines}
+    send
+  end tell
+end tell
+'''
+    run_osascript(script)
+
+
+def send_via_gmail(body_path: Path, recipients: list[str]) -> None:
+    url = compose_gmail_url(recipients)
     body_posix = str(body_path)
     escaped_url = url.replace('"', '\\"')
     escaped_path = body_posix.replace('"', '\\"')
@@ -623,7 +647,9 @@ def write_body(body: str) -> Path:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--send", action="store_true", help="Send the generated email through Gmail web.")
+    parser.add_argument("--send", action="store_true", help="Send the generated email through macOS Mail.")
+    parser.add_argument("--gmail-web", action="store_true", help="Send through Gmail web UI instead of macOS Mail.")
+    parser.add_argument("--test", action="store_true", help="Send only to the configured test recipient.")
     parser.add_argument("--dry-run", action="store_true", help="Generate only and print the output path.")
     args = parser.parse_args()
 
@@ -640,11 +666,19 @@ def main() -> int:
     log(f"Wrote {body_path}")
 
     if args.send:
-        log("Sending through Gmail web")
-        send_via_gmail(body_path)
-        state = load_state()
-        state["sent_urls"] = list(dict.fromkeys(state.get("sent_urls", []) + [i["url"] for i in selected]))
-        save_state(state)
+        recipients = TEST_RECIPIENTS if args.test else RECIPIENTS
+        if args.gmail_web:
+            log(f"Sending through Gmail web to {', '.join(recipients)}")
+            send_via_gmail(body_path, recipients)
+        else:
+            log(f"Sending through macOS Mail to {', '.join(recipients)}")
+            send_via_mail(body_path, recipients)
+        if args.test:
+            log("Test send completed; sent URL state was not updated")
+        else:
+            state = load_state()
+            state["sent_urls"] = list(dict.fromkeys(state.get("sent_urls", []) + [i["url"] for i in selected]))
+            save_state(state)
         log("Send command completed")
     elif args.dry_run:
         print(body_path)
