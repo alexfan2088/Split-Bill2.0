@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = Path.home() / ".codex" / "ai_daily"
 OUT_DIR = DATA_DIR / "out"
 STATE_PATH = DATA_DIR / "sent_urls.json"
+ITEM_LIMIT = 5
 RECIPIENTS = [
     "1394628250@qq.com",
     "1347191150@qq.com",
@@ -426,16 +427,16 @@ def select_items(items: list[dict]) -> list[dict]:
     state = load_state()
     sent = set(state.get("sent_urls", []))
     fresh = [item for item in items if item["url"] not in sent]
-    selected = fresh[:10]
-    if len(selected) < 10:
+    selected = fresh[:ITEM_LIMIT]
+    if len(selected) < ITEM_LIMIT:
         for item in items:
             if item not in selected:
                 selected.append(item)
-            if len(selected) == 10:
+            if len(selected) == ITEM_LIMIT:
                 break
     ensure_robotics(items, selected)
     ensure_china_ai(items, selected)
-    return selected[:10]
+    return selected[:ITEM_LIMIT]
 
 
 def stars(item: dict, index: int) -> str:
@@ -629,7 +630,7 @@ def main() -> int:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     log("Collecting AI news")
     items = collect_items()
-    if len(items) < 10:
+    if len(items) < ITEM_LIMIT:
         log(f"Only collected {len(items)} eligible items; continuing with available items")
     selected = select_items(items)
     if not selected:
