@@ -32,7 +32,7 @@ RECIPIENTS = [
     "rocket.tang@163.com",
 ]
 TEST_RECIPIENTS = ["1394628250@qq.com"]
-SUBJECT = "AI 日日观"
+SUBJECT = "AI 每天观察"
 
 FEEDS = [
     "https://techcrunch.com/category/artificial-intelligence/feed/",
@@ -549,7 +549,7 @@ def glossary_lines(items: list[dict]) -> list[str]:
 
 def build_body(items: list[dict]) -> str:
     today = dt.datetime.now().strftime("%Y-%m-%d")
-    lines = ["AI 日日观", "", f"本期采集窗口：最近 3 天，生成日期：{today}。"]
+    lines = ["AI 每天观察", "", f"本期采集窗口：最近 3 天，生成日期：{today}。"]
     for idx, item in enumerate(items, 1):
         lines.extend(
             [
