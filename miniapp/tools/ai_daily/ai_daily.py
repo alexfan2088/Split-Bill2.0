@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = Path.home() / ".codex" / "ai_daily"
 OUT_DIR = DATA_DIR / "out"
 STATE_PATH = DATA_DIR / "sent_urls.json"
+GLOSSARY_STATE_PATH = DATA_DIR / "glossary_state.json"
 ITEM_LIMIT = 5
 RECIPIENTS = [
     "1394628250@qq.com",
@@ -169,6 +170,66 @@ GLOSSARY_TERMS = [
             "生活类比：传统机器人像只会一道菜的机器厨师；机器人基础模型像受过训练的学徒，能看菜谱、观察食材、试着调整步骤，但还需要监督和安全限制。",
         ],
     },
+    {
+        "term": "多模态模型",
+        "aliases": ["multimodal", "vision-language", "omni", "语音", "视频", "图像", "多模态"],
+        "body": [
+            "多模态模型是能同时处理文字、图片、语音、视频等多种信息的 AI 模型。",
+            "它和只看文字的模型不同，可以看图理解内容、听语音判断语气、读视频里的动作，再用文字或语音回答。",
+            "典型应用包括拍照问答、视频理解、实时语音助手、会议分析、工业质检和机器人视觉控制。",
+            "生活类比：普通文本模型像只会读文件的人，多模态模型像既能看现场、听声音、读材料，又能综合判断的助手。",
+        ],
+    },
+    {
+        "term": "推理模型",
+        "aliases": ["reasoning model", "reasoning", "推理", "思考", "o3", "o4", "deep research"],
+        "body": [
+            "推理模型是更擅长分步骤思考、数学、代码、规划和复杂问题分析的大模型。",
+            "它通常不会只追求最快回答，而是会花更多计算量拆解问题、检查中间步骤，再给出结果。",
+            "这类模型适合做复杂文档分析、代码调试、策略推演、科研辅助、数据解释和多步骤 Agent 任务。",
+            "生活类比：普通模型像反应很快的问答助手，推理模型像愿意拿草稿纸认真演算的分析师。",
+        ],
+    },
+    {
+        "term": "RAG",
+        "aliases": ["rag", "retrieval augmented generation", "检索增强", "知识库"],
+        "body": [
+            "RAG 是 Retrieval-Augmented Generation 的缩写，常译为检索增强生成。",
+            "它的做法是先从企业文档、知识库或网页里检索相关资料，再让大模型基于这些资料回答问题。",
+            "RAG 的价值在于降低幻觉、接入私有知识、让答案可追溯来源，也方便企业在不重新训练模型的情况下更新知识。",
+            "生活类比：不用 RAG 像让人凭记忆回答；用 RAG 像先把资料翻到相关页，再让人根据资料作答。",
+        ],
+    },
+    {
+        "term": "AI 芯片",
+        "aliases": ["gpu", "chip", "semiconductor", "nvidia", "inference", "算力", "芯片"],
+        "body": [
+            "AI 芯片是专门用来训练或运行 AI 模型的计算硬件，GPU 是其中最重要的一类。",
+            "大模型需要大量矩阵计算，普通 CPU 不够高效，GPU、TPU、NPU 等芯片能更快完成训练和推理。",
+            "AI 芯片影响模型成本、响应速度、数据中心建设、云服务价格，也会影响公司能不能大规模提供 AI 产品。",
+            "生活类比：模型像厨师，数据像食材，AI 芯片就是厨房设备；设备越强，出餐越快，但电费和投入也更高。",
+        ],
+    },
+    {
+        "term": "合成数据",
+        "aliases": ["synthetic data", "data generation", "training data", "数据", "合成数据"],
+        "body": [
+            "合成数据是由程序、仿真系统或 AI 模型生成的数据，用来补充真实数据不足。",
+            "在 AI 训练里，真实数据可能昂贵、敏感、稀缺或有版权风险，合成数据可以覆盖更多场景和边界情况。",
+            "它常用于自动驾驶、机器人、医学影像、代码训练、客服对话和安全测试等领域。",
+            "生活类比：真实数据像真实考试题，合成数据像老师按知识点编的新练习题；有用，但质量必须严格检查。",
+        ],
+    },
+    {
+        "term": "模型蒸馏",
+        "aliases": ["distillation", "distill", "small model", "模型蒸馏", "小模型"],
+        "body": [
+            "模型蒸馏是把大模型的能力压缩到更小模型里的训练方法。",
+            "大模型通常能力强但成本高、速度慢；蒸馏后的模型更轻、更便宜，更适合在手机、电脑、浏览器或企业私有环境里运行。",
+            "它常用于客服、搜索、代码补全、端侧 AI 和高频低成本推理场景。",
+            "生活类比：大模型像资深老师，小模型像学生；蒸馏就是让学生学习老师的解题方法，尽量用更低成本完成类似任务。",
+        ],
+    },
 ]
 
 
@@ -216,6 +277,81 @@ def text_of(node: ET.Element, names: list[str]) -> str:
 def clean_text(value: str) -> str:
     value = html.unescape(re.sub(r"<[^>]+>", " ", value))
     return re.sub(r"\s+", " ", value).strip()
+
+
+def has_chinese(value: str) -> bool:
+    return bool(re.search(r"[\u4e00-\u9fff]", value))
+
+
+def decode_html(content: bytes) -> str:
+    for encoding in ["utf-8", "gb18030", "latin-1"]:
+        try:
+            return content.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return content.decode("utf-8", errors="ignore")
+
+
+def extract_meta_description(page: str) -> str:
+    for pattern in [
+        r'<meta[^>]+property=["\']og:description["\'][^>]+content=["\']([^"\']+)["\']',
+        r'<meta[^>]+name=["\']description["\'][^>]+content=["\']([^"\']+)["\']',
+        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:description["\']',
+        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']description["\']',
+    ]:
+        match = re.search(pattern, page, flags=re.I | re.S)
+        if match:
+            return clean_text(match.group(1))
+    return ""
+
+
+def extract_article_text(url: str, fallback: str) -> str:
+    try:
+        page = decode_html(fetch_url(url, timeout=15))
+    except Exception as exc:
+        log(f"Article fetch failed: {url}: {exc}")
+        return fallback
+    page = re.sub(r"(?is)<(script|style|noscript|svg|header|footer|nav|aside)[^>]*>.*?</\1>", " ", page)
+    paragraphs = []
+    for paragraph in re.findall(r"(?is)<p[^>]*>(.*?)</p>", page):
+        text = clean_text(paragraph)
+        if len(text) < 60:
+            continue
+        if any(skip in text.lower() for skip in ["cookie", "subscribe", "newsletter", "advertisement", "sign up"]):
+            continue
+        paragraphs.append(text)
+        if len(" ".join(paragraphs)) >= 1400:
+            break
+    article = " ".join(paragraphs).strip()
+    if len(article) < 160:
+        article = extract_meta_description(page)
+    if len(article) < 80:
+        article = fallback
+    return re.sub(r"\s+", " ", article).strip()[:1800]
+
+
+def translate_to_chinese(text: str) -> str:
+    if not text or has_chinese(text):
+        return text
+    chunks = [text[i : i + 1200] for i in range(0, len(text), 1200)]
+    translated_chunks = []
+    for chunk in chunks[:2]:
+        query = urllib.parse.urlencode(
+            {
+                "client": "gtx",
+                "sl": "auto",
+                "tl": "zh-CN",
+                "dt": "t",
+                "q": chunk,
+            }
+        )
+        try:
+            data = json.loads(fetch_url(f"https://translate.googleapis.com/translate_a/single?{query}", timeout=15).decode("utf-8"))
+            translated_chunks.append("".join(part[0] for part in data[0] if part and part[0]))
+        except Exception as exc:
+            log(f"Translation failed: {exc}")
+            translated_chunks.append(chunk)
+    return re.sub(r"\s+", " ", "".join(translated_chunks)).strip()
 
 
 def title_key(title: str) -> str:
@@ -334,6 +470,8 @@ def score_item(item: dict) -> int:
             score += 3
     if any(k in text for k in ["video friday", "guide to", "event calendar", "webinar"]):
         score -= 8
+    if item.get("source") == "news.google.com":
+        score -= 10
     try:
         age = dt.datetime.now(dt.UTC) - dt.datetime.fromisoformat(item["published"])
         score += max(0, 10 - int(age.total_seconds() // 86400))
@@ -355,6 +493,26 @@ def save_state(state: dict) -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     urls = list(dict.fromkeys(state.get("sent_urls", [])))[-500:]
     STATE_PATH.write_text(json.dumps({"sent_urls": urls}, ensure_ascii=False, indent=2), "utf-8")
+
+
+def load_glossary_state() -> dict:
+    if not GLOSSARY_STATE_PATH.exists():
+        return {"recent_terms": []}
+    try:
+        return json.loads(GLOSSARY_STATE_PATH.read_text("utf-8"))
+    except Exception:
+        return {"recent_terms": []}
+
+
+def save_glossary_state(terms: list[dict]) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    state = load_glossary_state()
+    today = dt.datetime.now().strftime("%Y-%m-%d")
+    recent = list(dict.fromkeys(state.get("recent_terms", []) + [entry["term"] for entry in terms]))[-20:]
+    GLOSSARY_STATE_PATH.write_text(
+        json.dumps({"date": today, "recent_terms": recent, "last_terms": [entry["term"] for entry in terms]}, ensure_ascii=False, indent=2),
+        "utf-8",
+    )
 
 
 def collect_items() -> list[dict]:
@@ -501,18 +659,15 @@ def infer_topic(item: dict) -> tuple[str, str, str, str]:
 
 
 def article_detail(item: dict) -> str:
-    source = item.get("source", "公开来源")
     title = item.get("title", "")
-    summary = item.get("summary", "")
-    if summary:
-        return (
-            f"文章详细内容：这篇文章来自 {source}，标题是“{title}”。"
-            f"文章核心内容是：{summary}"
-        )
-    return (
-        f"文章详细内容：这篇文章来自 {source}，标题是“{title}”。"
-        "当前 RSS 没有提供更长摘要，因此这部分先基于标题和来源提炼重点；完整细节可以通过后面的原文链接继续查看。"
-    )
+    fallback = clean_text(f"{title}. {item.get('summary', '')}")
+    original_text = extract_article_text(item.get("url", ""), fallback)
+    if "comprehensive up-to-date news coverage" in original_text.lower() or "由 google 新闻" in original_text.lower():
+        original_text = fallback
+    translated_text = translate_to_chinese(original_text)
+    if has_chinese(original_text):
+        return f"原文内容：{translated_text}"
+    return f"原文直译：{translated_text}"
 
 
 def chinese_summary(item: dict, index: int) -> str:
@@ -545,7 +700,30 @@ def select_glossary_terms(items: list[dict]) -> list[dict]:
                 score += 1
         ranked.append((score, -index, entry))
     ranked.sort(reverse=True)
-    selected = [entry for score, _, entry in ranked if score > 0][:5]
+
+    state = load_glossary_state()
+    today = dt.datetime.now().strftime("%Y-%m-%d")
+    recent_terms = set(state.get("recent_terms", []))
+    if state.get("date") == today:
+        recent_terms -= set(state.get("last_terms", []))
+
+    selected: list[dict] = []
+    matched = [entry for score, _, entry in ranked if score > 0]
+    fresh_matched = [entry for entry in matched if entry["term"] not in recent_terms]
+    hot_fresh = [entry for entry in GLOSSARY_TERMS if entry["term"] not in recent_terms and entry not in fresh_matched]
+
+    for entry in fresh_matched + hot_fresh:
+        if len(selected) >= 2:
+            break
+        if entry not in selected:
+            selected.append(entry)
+
+    for entry in matched + GLOSSARY_TERMS:
+        if len(selected) >= 5:
+            break
+        if entry not in selected:
+            selected.append(entry)
+
     for entry in GLOSSARY_TERMS:
         if len(selected) >= 5:
             break
@@ -575,10 +753,11 @@ def append_segments(parts: list[str], styles: list[dict], segments: list[tuple[s
     parts.append("\n")
 
 
-def build_body_with_styles(items: list[dict]) -> tuple[str, list[dict]]:
+def build_body_with_styles(items: list[dict], glossary_terms: list[dict] | None = None) -> tuple[str, list[dict]]:
     today = dt.datetime.now().strftime("%Y-%m-%d")
     parts: list[str] = []
     styles: list[dict] = []
+    glossary_terms = glossary_terms or select_glossary_terms(items)
 
     append_segments(parts, styles, [("AI 每天观察", None)])
     append_segments(parts, styles, [("", None)])
@@ -610,7 +789,7 @@ def build_body_with_styles(items: list[dict]) -> tuple[str, list[dict]]:
 
     append_segments(parts, styles, [("", None)])
     append_segments(parts, styles, [("每日名词：", RED_BOLD)])
-    for index, entry in enumerate(select_glossary_terms(items), 1):
+    for index, entry in enumerate(glossary_terms, 1):
         append_segments(parts, styles, [("", None)])
         append_segments(parts, styles, [(f"{index}. {entry['term']}", BLACK_BOLD)])
         for line in entry["body"]:
@@ -735,7 +914,8 @@ def main() -> int:
     if not selected:
         raise RuntimeError("No AI news items collected.")
 
-    body, styles = build_body_with_styles(selected)
+    glossary_terms = select_glossary_terms(selected)
+    body, styles = build_body_with_styles(selected, glossary_terms)
     body_path = write_body(body)
     log(f"Wrote {body_path}")
 
@@ -753,6 +933,7 @@ def main() -> int:
             state = load_state()
             state["sent_urls"] = list(dict.fromkeys(state.get("sent_urls", []) + [i["url"] for i in selected]))
             save_state(state)
+            save_glossary_state(glossary_terms)
         log("Send command completed")
     elif args.dry_run:
         print(body_path)
