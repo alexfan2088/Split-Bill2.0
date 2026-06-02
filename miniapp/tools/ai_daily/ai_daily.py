@@ -839,21 +839,17 @@ def mail_style_commands(styles: list[dict] | None) -> str:
     return "\n".join(commands)
 
 
-def send_via_mail(body_path: Path, recipients: list[str], styles: list[dict] | None = None) -> None:
+def send_one_via_mail(body_path: Path, recipient: str, styles: list[dict] | None = None) -> None:
     escaped_path = str(body_path).replace('"', '\\"')
-    recipient_lines = "\n".join(
-        f"    make new to recipient at end of to recipients with properties {{address:{applescript_string(address)}}}"
-        for address in recipients
-    )
     style_commands = mail_style_commands(styles)
     script = f'''
 set bodyText to read POSIX file "{escaped_path}" as «class utf8»
-with timeout of 600 seconds
+with timeout of 180 seconds
   tell application "Mail"
     activate
     set newMessage to make new outgoing message with properties {{subject:{applescript_string(SUBJECT)}, content:bodyText, visible:false}}
     tell newMessage
-{recipient_lines}
+      make new to recipient at end of to recipients with properties {{address:{applescript_string(recipient)}}}
 {style_commands}
       send
     end tell
@@ -861,6 +857,19 @@ with timeout of 600 seconds
 end timeout
 '''
     run_osascript(script)
+
+
+def send_via_mail(body_path: Path, recipients: list[str], styles: list[dict] | None = None) -> None:
+    failures = []
+    for recipient in recipients:
+        log(f"Sending Mail message to {recipient}")
+        try:
+            send_one_via_mail(body_path, recipient, styles)
+        except Exception as exc:
+            failures.append(f"{recipient}: {exc}")
+            log(f"Mail send failed for {recipient}: {exc}")
+    if failures:
+        raise RuntimeError("Some Mail sends failed: " + " | ".join(failures))
 
 
 def send_via_gmail(body_path: Path, recipients: list[str]) -> None:
