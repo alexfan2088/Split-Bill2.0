@@ -500,6 +500,21 @@ def infer_topic(item: dict) -> tuple[str, str, str, str]:
     )
 
 
+def article_detail(item: dict) -> str:
+    source = item.get("source", "公开来源")
+    title = item.get("title", "")
+    summary = item.get("summary", "")
+    if summary:
+        return (
+            f"文章详细内容：这篇文章来自 {source}，标题是“{title}”。"
+            f"文章核心内容是：{summary}"
+        )
+    return (
+        f"文章详细内容：这篇文章来自 {source}，标题是“{title}”。"
+        "当前 RSS 没有提供更长摘要，因此这部分先基于标题和来源提炼重点；完整细节可以通过后面的原文链接继续查看。"
+    )
+
+
 def chinese_summary(item: dict, index: int) -> str:
     source = item.get("source", "公开来源")
     topic, context, impact, watch = infer_topic(item)
@@ -510,7 +525,7 @@ def chinese_summary(item: dict, index: int) -> str:
         "它值得放进趋势列表，是因为背后牵涉到产品、资本、技术和用户采用之间的联动。",
     ][index % 4]
     return (
-        f"中文详细解读：这条消息来自 {source}，主题可以归入“{topic}”。"
+        f"解读：这条消息来自 {source}，主题可以归入“{topic}”。"
         f"{context}{rank_note}"
         "看这类消息时，重点不是把它当成普通新闻浏览一遍，而是要拆成三个层面理解。第一，它说明相关公司正在把 AI 能力继续往真实产品、真实客户或真实基础设施里推进；第二，它会影响产业链上其他参与者的判断，例如开发者是否跟进新平台，企业是否调整采购计划，创业公司是否重新选择切入点；第三，它也会暴露落地难点，包括成本、稳定性、数据安全、合规、渠道和用户习惯。"
         f"{impact}"
@@ -530,13 +545,13 @@ def select_glossary_terms(items: list[dict]) -> list[dict]:
                 score += 1
         ranked.append((score, -index, entry))
     ranked.sort(reverse=True)
-    selected = [entry for score, _, entry in ranked if score > 0][:3]
+    selected = [entry for score, _, entry in ranked if score > 0][:5]
     for entry in GLOSSARY_TERMS:
-        if len(selected) >= 3:
+        if len(selected) >= 5:
             break
         if entry not in selected:
             selected.append(entry)
-    return selected[:3]
+    return selected[:5]
 
 
 def glossary_lines(items: list[dict]) -> list[str]:
@@ -547,29 +562,66 @@ def glossary_lines(items: list[dict]) -> list[str]:
     return lines
 
 
-def build_body(items: list[dict]) -> str:
+BLUE_BOLD = {"color": [0, 18000, 52000], "font": "PingFang SC Semibold"}
+RED_BOLD = {"color": [52000, 0, 0], "font": "PingFang SC Semibold"}
+BLACK_BOLD = {"color": [0, 0, 0], "font": "PingFang SC Semibold"}
+
+
+def append_segments(parts: list[str], styles: list[dict], segments: list[tuple[str, dict | None]]) -> None:
+    for text, style in segments:
+        if style and text:
+            styles.append({"start": len("".join(parts)) + 1, "end": len("".join(parts)) + len(text), **style})
+        parts.append(text)
+    parts.append("\n")
+
+
+def build_body_with_styles(items: list[dict]) -> tuple[str, list[dict]]:
     today = dt.datetime.now().strftime("%Y-%m-%d")
-    lines = ["AI 每天观察", "", f"本期采集窗口：最近 3 天，生成日期：{today}。"]
+    parts: list[str] = []
+    styles: list[dict] = []
+
+    append_segments(parts, styles, [("AI 每天观察", None)])
+    append_segments(parts, styles, [("", None)])
+    append_segments(parts, styles, [(f"本期采集窗口：最近 3 天，生成日期：{today}。", None)])
+
     for idx, item in enumerate(items, 1):
-        lines.extend(
-            [
-                "",
-                f"{idx}. {item['title']}",
-                f"推荐指数：{stars(item, idx - 1)}",
-                chinese_summary(item, idx - 1),
-                "链接：",
-                item["url"],
-            ]
-        )
-    lines.extend(
+        append_segments(parts, styles, [("", None)])
+        append_segments(parts, styles, [(f"{idx}. {item['title']}", None)])
+        append_segments(parts, styles, [("推荐指数：", BLUE_BOLD), (stars(item, idx - 1), None)])
+        append_segments(parts, styles, [("中文详细解读：", BLUE_BOLD)])
+        append_segments(parts, styles, [(article_detail(item), None)])
+        append_segments(parts, styles, [("", None)])
+        append_segments(parts, styles, [(chinese_summary(item, idx - 1), None)])
+        append_segments(parts, styles, [("链接：", BLUE_BOLD)])
+        append_segments(parts, styles, [(item["url"], None)])
+
+    append_segments(parts, styles, [("", None)])
+    append_segments(parts, styles, [("今日结论：", None)])
+    append_segments(
+        parts,
+        styles,
         [
-            "",
-            "今日结论：",
-            "AI 竞争正在从单点模型能力转向系统能力。每天真正值得盯的，不只是某个模型又刷新了哪个榜单，而是谁能把 AI 稳定地接入真实业务、真实设备和真实收入。后续如果某条新闻连续多天发酵，本邮件会优先追踪新增信息，避免重复搬运同一条旧链接。",
-        ]
+            (
+                "AI 竞争正在从单点模型能力转向系统能力。每天真正值得盯的，不只是某个模型又刷新了哪个榜单，而是谁能把 AI 稳定地接入真实业务、真实设备和真实收入。后续如果某条新闻连续多天发酵，本邮件会优先追踪新增信息，避免重复搬运同一条旧链接。",
+                None,
+            )
+        ],
     )
-    lines.extend(glossary_lines(items))
-    return "\n".join(lines)
+
+    append_segments(parts, styles, [("", None)])
+    append_segments(parts, styles, [("每日名词：", RED_BOLD)])
+    for index, entry in enumerate(select_glossary_terms(items), 1):
+        append_segments(parts, styles, [("", None)])
+        append_segments(parts, styles, [(f"{index}. {entry['term']}", BLACK_BOLD)])
+        for line in entry["body"]:
+            append_segments(parts, styles, [(line, None)])
+
+    return "".join(parts).rstrip(), styles
+
+
+def build_body(items: list[dict]) -> str:
+    body, _ = build_body_with_styles(items)
+    return body
 
 
 def compose_gmail_url(recipients: list[str]) -> str:
@@ -592,12 +644,29 @@ def applescript_string(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def send_via_mail(body_path: Path, recipients: list[str]) -> None:
+def mail_style_commands(styles: list[dict] | None) -> str:
+    if not styles:
+        return ""
+    commands = []
+    for style in styles:
+        start = style["start"]
+        end = style["end"]
+        target = f"characters {start} thru {end} of content of newMessage"
+        if "color" in style:
+            color = ", ".join(str(value) for value in style["color"])
+            commands.append(f"      set color of {target} to {{{color}}}")
+        if "font" in style:
+            commands.append(f"      set font of {target} to {applescript_string(style['font'])}")
+    return "\n".join(commands)
+
+
+def send_via_mail(body_path: Path, recipients: list[str], styles: list[dict] | None = None) -> None:
     escaped_path = str(body_path).replace('"', '\\"')
     recipient_lines = "\n".join(
         f"    make new to recipient at end of to recipients with properties {{address:{applescript_string(address)}}}"
         for address in recipients
     )
+    style_commands = mail_style_commands(styles)
     script = f'''
 set bodyText to read POSIX file "{escaped_path}" as «class utf8»
 with timeout of 600 seconds
@@ -606,6 +675,7 @@ with timeout of 600 seconds
     set newMessage to make new outgoing message with properties {{subject:{applescript_string(SUBJECT)}, content:bodyText, visible:false}}
     tell newMessage
 {recipient_lines}
+{style_commands}
       send
     end tell
   end tell
@@ -665,7 +735,8 @@ def main() -> int:
     if not selected:
         raise RuntimeError("No AI news items collected.")
 
-    body_path = write_body(build_body(selected))
+    body, styles = build_body_with_styles(selected)
+    body_path = write_body(body)
     log(f"Wrote {body_path}")
 
     if args.send:
@@ -675,7 +746,7 @@ def main() -> int:
             send_via_gmail(body_path, recipients)
         else:
             log(f"Sending through macOS Mail to {', '.join(recipients)}")
-            send_via_mail(body_path, recipients)
+            send_via_mail(body_path, recipients, styles)
         if args.test:
             log("Test send completed; sent URL state was not updated")
         else:
