@@ -600,13 +600,16 @@ def send_via_mail(body_path: Path, recipients: list[str]) -> None:
     )
     script = f'''
 set bodyText to read POSIX file "{escaped_path}" as «class utf8»
-tell application "Mail"
-  set newMessage to make new outgoing message with properties {{subject:{applescript_string(SUBJECT)}, content:bodyText, visible:false}}
-  tell newMessage
+with timeout of 600 seconds
+  tell application "Mail"
+    activate
+    set newMessage to make new outgoing message with properties {{subject:{applescript_string(SUBJECT)}, content:bodyText, visible:false}}
+    tell newMessage
 {recipient_lines}
-    send
+      send
+    end tell
   end tell
-end tell
+end timeout
 '''
     run_osascript(script)
 
