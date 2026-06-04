@@ -819,8 +819,33 @@ def run_osascript(script: str) -> None:
         raise RuntimeError(result.stderr.strip() or result.stdout.strip())
 
 
+def start_caffeinate_guard() -> subprocess.Popen | None:
+    try:
+        return subprocess.Popen(["/usr/bin/caffeinate", "-dimsu", "-w", str(os.getpid())])
+    except Exception as exc:
+        log(f"Could not start caffeinate guard: {exc}")
+        return None
+
+
 def applescript_string(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def prewarm_mail() -> None:
+    script = '''
+with timeout of 90 seconds
+  tell application "Mail"
+    activate
+    delay 5
+    check for new mail
+  end tell
+end timeout
+'''
+    try:
+        run_osascript(script)
+        log("Mail prewarm completed")
+    except Exception as exc:
+        log(f"Mail prewarm warning: {exc}")
 
 
 def mail_style_commands(styles: list[dict] | None) -> str:
@@ -839,12 +864,12 @@ def mail_style_commands(styles: list[dict] | None) -> str:
     return "\n".join(commands)
 
 
-def send_one_via_mail(body_path: Path, recipient: str, styles: list[dict] | None = None) -> None:
+def send_one_via_mail(body_path: Path, recipient: str, styles: list[dict] | None = None, timeout: int = 180) -> None:
     escaped_path = str(body_path).replace('"', '\\"')
     style_commands = mail_style_commands(styles)
     script = f'''
 set bodyText to read POSIX file "{escaped_path}" as «class utf8»
-with timeout of 180 seconds
+with timeout of {timeout} seconds
   tell application "Mail"
     activate
     set newMessage to make new outgoing message with properties {{subject:{applescript_string(SUBJECT)}, content:bodyText, visible:false}}
@@ -861,13 +886,27 @@ end timeout
 
 def send_via_mail(body_path: Path, recipients: list[str], styles: list[dict] | None = None) -> None:
     failures = []
+    prewarm_mail()
+    use_rich_text = bool(styles)
     for recipient in recipients:
         log(f"Sending Mail message to {recipient}")
         try:
-            send_one_via_mail(body_path, recipient, styles)
+            send_one_via_mail(body_path, recipient, styles if use_rich_text else None, timeout=120)
         except Exception as exc:
-            failures.append(f"{recipient}: {exc}")
-            log(f"Mail send failed for {recipient}: {exc}")
+            if use_rich_text:
+                log(f"Rich text Mail send failed for {recipient}; falling back to plain text: {exc}")
+                use_rich_text = False
+                prewarm_mail()
+                try:
+                    send_one_via_mail(body_path, recipient, None, timeout=120)
+                    log(f"Plain text fallback succeeded for {recipient}")
+                    continue
+                except Exception as fallback_exc:
+                    failures.append(f"{recipient}: rich text failed: {exc}; plain text failed: {fallback_exc}")
+                    log(f"Mail send failed for {recipient}: {fallback_exc}")
+            else:
+                failures.append(f"{recipient}: {exc}")
+                log(f"Mail send failed for {recipient}: {exc}")
     if failures:
         raise RuntimeError("Some Mail sends failed: " + " | ".join(failures))
 
@@ -907,6 +946,7 @@ def write_body(body: str) -> Path:
 
 
 def main() -> int:
+    caffeinate_guard = start_caffeinate_guard()
     parser = argparse.ArgumentParser()
     parser.add_argument("--send", action="store_true", help="Send the generated email through macOS Mail.")
     parser.add_argument("--gmail-web", action="store_true", help="Send through Gmail web UI instead of macOS Mail.")
@@ -946,6 +986,8 @@ def main() -> int:
         log("Send command completed")
     elif args.dry_run:
         print(body_path)
+    if caffeinate_guard:
+        caffeinate_guard.poll()
     return 0
 
 
