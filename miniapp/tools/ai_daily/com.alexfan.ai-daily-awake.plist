@@ -6,10 +6,7 @@
   <string>com.alexfan.ai-daily-awake</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/usr/bin/caffeinate</string>
-    <string>-dimsu</string>
-    <string>-t</string>
-    <string>600</string>
+    <string>/Users/fwp-mac/dev/Split-Bill2.0/miniapp/tools/ai_daily/ai_daily_awake.sh</string>
   </array>
   <key>StartCalendarInterval</key>
   <dict>

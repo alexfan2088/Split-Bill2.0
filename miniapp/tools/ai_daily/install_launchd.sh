@@ -10,6 +10,7 @@ AWAKE_DST="${HOME}/Library/LaunchAgents/${AWAKE_LABEL}.plist"
 
 mkdir -p "${HOME}/Library/LaunchAgents" "${HOME}/Library/Logs" "${HOME}/.codex/ai_daily/out"
 chmod +x "/Users/fwp-mac/dev/Split-Bill2.0/miniapp/tools/ai_daily/ai_daily.py"
+chmod +x "/Users/fwp-mac/dev/Split-Bill2.0/miniapp/tools/ai_daily/ai_daily_awake.sh"
 plutil -lint "${SRC}"
 cp "${SRC}" "${DST}"
 chmod 644 "${DST}"
