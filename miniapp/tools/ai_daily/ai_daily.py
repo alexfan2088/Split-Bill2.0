@@ -803,11 +803,11 @@ def build_body(items: list[dict]) -> str:
     return body
 
 
-def compose_gmail_url(recipients: list[str]) -> str:
+def compose_gmail_url(recipient: str) -> str:
     params = {
         "view": "cm",
         "fs": "1",
-        "to": ",".join(recipients),
+        "to": recipient,
         "su": SUBJECT,
     }
     return "https://mail.google.com/mail/?" + urllib.parse.urlencode(params)
@@ -911,8 +911,8 @@ def send_via_mail(body_path: Path, recipients: list[str], styles: list[dict] | N
         raise RuntimeError("Some Mail sends failed: " + " | ".join(failures))
 
 
-def send_via_gmail(body_path: Path, recipients: list[str]) -> None:
-    url = compose_gmail_url(recipients)
+def send_one_via_gmail(body_path: Path, recipient: str) -> None:
+    url = compose_gmail_url(recipient)
     body_posix = str(body_path)
     escaped_url = url.replace('"', '\\"')
     escaped_path = body_posix.replace('"', '\\"')
@@ -938,6 +938,19 @@ delay 5
     run_osascript(script)
 
 
+def send_via_gmail(body_path: Path, recipients: list[str]) -> None:
+    failures = []
+    for recipient in recipients:
+        log(f"Sending Gmail web message to {recipient}")
+        try:
+            send_one_via_gmail(body_path, recipient)
+        except Exception as exc:
+            failures.append(f"{recipient}: {exc}")
+            log(f"Gmail web send failed for {recipient}: {exc}")
+    if failures:
+        raise RuntimeError("Some Gmail web sends failed: " + " | ".join(failures))
+
+
 def write_body(body: str) -> Path:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     path = OUT_DIR / f"ai_daily_{dt.datetime.now().strftime('%Y-%m-%d')}.txt"
@@ -948,8 +961,8 @@ def write_body(body: str) -> Path:
 def main() -> int:
     caffeinate_guard = start_caffeinate_guard()
     parser = argparse.ArgumentParser()
-    parser.add_argument("--send", action="store_true", help="Send the generated email through macOS Mail.")
-    parser.add_argument("--gmail-web", action="store_true", help="Send through Gmail web UI instead of macOS Mail.")
+    parser.add_argument("--send", action="store_true", help="Send the generated email through Gmail web UI.")
+    parser.add_argument("--mail", action="store_true", help="Send through macOS Mail instead of Gmail web UI.")
     parser.add_argument("--test", action="store_true", help="Send only to the configured test recipient.")
     parser.add_argument("--dry-run", action="store_true", help="Generate only and print the output path.")
     args = parser.parse_args()
@@ -970,12 +983,12 @@ def main() -> int:
 
     if args.send:
         recipients = TEST_RECIPIENTS if args.test else RECIPIENTS
-        if args.gmail_web:
-            log(f"Sending through Gmail web to {', '.join(recipients)}")
-            send_via_gmail(body_path, recipients)
-        else:
+        if args.mail:
             log(f"Sending through macOS Mail to {', '.join(recipients)}")
             send_via_mail(body_path, recipients, styles)
+        else:
+            log(f"Sending through Gmail web to {', '.join(recipients)}")
+            send_via_gmail(body_path, recipients)
         if args.test:
             log("Test send completed; sent URL state was not updated")
         else:
