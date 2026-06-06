@@ -819,6 +819,15 @@ def run_osascript(script: str) -> None:
         raise RuntimeError(result.stderr.strip() or result.stdout.strip())
 
 
+def run_osascript_lines(lines: list[str]) -> None:
+    command = ["osascript"]
+    for line in lines:
+        command.extend(["-e", line])
+    result = subprocess.run(command, text=True, capture_output=True)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or result.stdout.strip())
+
+
 def start_caffeinate_guard() -> subprocess.Popen | None:
     try:
         return subprocess.Popen(["/usr/bin/caffeinate", "-dimsu", "-w", str(os.getpid())])
@@ -914,39 +923,54 @@ def send_via_mail(body_path: Path, recipients: list[str], styles: list[dict] | N
 def send_one_via_gmail(body_path: Path, recipient: str) -> None:
     url = compose_gmail_url(recipient)
     body_posix = str(body_path)
-    escaped_url = url.replace('"', '\\"')
-    escaped_path = body_posix.replace('"', '\\"')
-    script = f'''
-tell application "Google Chrome"
-  activate
-  open location "{escaped_url}"
-end tell
-delay 8
-set bodyText to read POSIX file "{escaped_path}" as «class utf8»
-set the clipboard to bodyText
-with timeout of 300 seconds
-  tell application "System Events"
-    set frontmost of process "Google Chrome" to true
-    delay 1
-    keystroke "v" using {{command down}}
-    delay 2
-    key code 36 using {{command down}}
-  end tell
-end timeout
-delay 5
-'''
-    run_osascript(script)
+    run_osascript_lines(
+        [
+            "with timeout of 60 seconds",
+            '  tell application "Google Chrome"',
+            "    activate",
+            f"    open location {applescript_string(url)}",
+            "  end tell",
+            "end timeout",
+        ]
+    )
+    time.sleep(10)
+    run_osascript_lines(
+        [
+            f"set bodyText to read POSIX file {applescript_string(body_posix)} as «class utf8»",
+            "set the clipboard to bodyText",
+            "with timeout of 90 seconds",
+            '  tell application "System Events"',
+            '    if not (exists process "Google Chrome") then error "Google Chrome process is not available"',
+            '    set frontmost of process "Google Chrome" to true',
+            "    delay 2",
+            '    keystroke "v" using {command down}',
+            "    delay 3",
+            "    key code 36 using {command down}",
+            "  end tell",
+            "end timeout",
+        ]
+    )
+    time.sleep(8)
 
 
 def send_via_gmail(body_path: Path, recipients: list[str]) -> None:
     failures = []
     for recipient in recipients:
-        log(f"Sending Gmail web message to {recipient}")
-        try:
-            send_one_via_gmail(body_path, recipient)
-        except Exception as exc:
-            failures.append(f"{recipient}: {exc}")
-            log(f"Gmail web send failed for {recipient}: {exc}")
+        sent = False
+        last_error: Exception | None = None
+        for attempt in range(1, 4):
+            log(f"Sending Gmail web message to {recipient} (attempt {attempt}/3)")
+            try:
+                send_one_via_gmail(body_path, recipient)
+                sent = True
+                break
+            except Exception as exc:
+                last_error = exc
+                log(f"Gmail web send attempt {attempt} failed for {recipient}: {exc}")
+                time.sleep(15)
+        if not sent:
+            failures.append(f"{recipient}: {last_error}")
+            log(f"Gmail web send failed for {recipient}: {last_error}")
     if failures:
         raise RuntimeError("Some Gmail web sends failed: " + " | ".join(failures))
 
