@@ -10,12 +10,14 @@ import html
 import json
 import os
 import re
+import smtplib
 import subprocess
 import sys
 import time
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+from email.message import EmailMessage
 from pathlib import Path
 
 
@@ -24,6 +26,7 @@ DATA_DIR = Path.home() / ".codex" / "ai_daily"
 OUT_DIR = DATA_DIR / "out"
 STATE_PATH = DATA_DIR / "sent_urls.json"
 GLOSSARY_STATE_PATH = DATA_DIR / "glossary_state.json"
+SMTP_CONFIG_PATH = DATA_DIR / "smtp.json"
 ITEM_LIMIT = 5
 RECIPIENTS = [
     "1394628250@qq.com",
@@ -34,6 +37,7 @@ RECIPIENTS = [
 ]
 TEST_RECIPIENTS = ["1394628250@qq.com"]
 SUBJECT = "AI 每天观察"
+SMTP_KEYCHAIN_SERVICE = "ai-daily-smtp-password"
 
 FEEDS = [
     "https://techcrunch.com/category/artificial-intelligence/feed/",
@@ -828,6 +832,44 @@ def run_osascript_lines(lines: list[str]) -> None:
         raise RuntimeError(result.stderr.strip() or result.stdout.strip())
 
 
+def read_keychain_password(service: str, account: str) -> str:
+    result = subprocess.run(
+        ["security", "find-generic-password", "-s", service, "-a", account, "-w"],
+        text=True,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        return ""
+    return result.stdout.strip()
+
+
+def load_smtp_config() -> dict:
+    config = {
+        "host": os.environ.get("AI_DAILY_SMTP_HOST", "smtp.gmail.com"),
+        "port": int(os.environ.get("AI_DAILY_SMTP_PORT", "587")),
+        "user": os.environ.get("AI_DAILY_SMTP_USER", ""),
+        "from": os.environ.get("AI_DAILY_SMTP_FROM", ""),
+    }
+    if SMTP_CONFIG_PATH.exists():
+        try:
+            file_config = json.loads(SMTP_CONFIG_PATH.read_text("utf-8"))
+            config.update({key: value for key, value in file_config.items() if value})
+        except Exception as exc:
+            log(f"SMTP config warning: {exc}")
+    if not config["from"]:
+        config["from"] = config["user"]
+    password = os.environ.get("AI_DAILY_SMTP_PASSWORD", "")
+    if not password and config["user"]:
+        password = read_keychain_password(SMTP_KEYCHAIN_SERVICE, config["user"])
+    config["password"] = password
+    return config
+
+
+def smtp_is_configured() -> bool:
+    config = load_smtp_config()
+    return bool(config.get("host") and config.get("port") and config.get("user") and config.get("from") and config.get("password"))
+
+
 def start_caffeinate_guard() -> subprocess.Popen | None:
     try:
         return subprocess.Popen(["/usr/bin/caffeinate", "-dimsu", "-w", str(os.getpid())])
@@ -920,6 +962,39 @@ def send_via_mail(body_path: Path, recipients: list[str], styles: list[dict] | N
         raise RuntimeError("Some Mail sends failed: " + " | ".join(failures))
 
 
+def send_via_smtp(body_path: Path, recipients: list[str]) -> None:
+    config = load_smtp_config()
+    missing = [key for key in ["host", "port", "user", "from", "password"] if not config.get(key)]
+    if missing:
+        raise RuntimeError(
+            "SMTP is not configured; missing "
+            + ", ".join(missing)
+            + f". Create {SMTP_CONFIG_PATH} and store the password in keychain service {SMTP_KEYCHAIN_SERVICE}."
+        )
+
+    body = body_path.read_text("utf-8")
+    failures = []
+    for recipient in recipients:
+        log(f"Sending SMTP message to {recipient}")
+        message = EmailMessage()
+        message["From"] = config["from"]
+        message["To"] = recipient
+        message["Subject"] = SUBJECT
+        message.set_content(body)
+        try:
+            with smtplib.SMTP(config["host"], int(config["port"]), timeout=60) as smtp:
+                smtp.ehlo()
+                smtp.starttls()
+                smtp.ehlo()
+                smtp.login(config["user"], config["password"])
+                smtp.send_message(message)
+        except Exception as exc:
+            failures.append(f"{recipient}: {exc}")
+            log(f"SMTP send failed for {recipient}: {exc}")
+    if failures:
+        raise RuntimeError("Some SMTP sends failed: " + " | ".join(failures))
+
+
 def send_one_via_gmail(body_path: Path, recipient: str) -> None:
     url = compose_gmail_url(recipient)
     body_posix = str(body_path)
@@ -985,7 +1060,9 @@ def write_body(body: str) -> Path:
 def main() -> int:
     caffeinate_guard = start_caffeinate_guard()
     parser = argparse.ArgumentParser()
-    parser.add_argument("--send", action="store_true", help="Send the generated email through Gmail web UI.")
+    parser.add_argument("--send", action="store_true", help="Send the generated email. Defaults to SMTP when configured.")
+    parser.add_argument("--smtp", action="store_true", help="Send through SMTP.")
+    parser.add_argument("--gmail-web", action="store_true", help="Send through Gmail web UI.")
     parser.add_argument("--mail", action="store_true", help="Send through macOS Mail instead of Gmail web UI.")
     parser.add_argument("--test", action="store_true", help="Send only to the configured test recipient.")
     parser.add_argument("--dry-run", action="store_true", help="Generate only and print the output path.")
@@ -1010,7 +1087,14 @@ def main() -> int:
         if args.mail:
             log(f"Sending through macOS Mail to {', '.join(recipients)}")
             send_via_mail(body_path, recipients, styles)
+        elif args.gmail_web:
+            log(f"Sending through Gmail web to {', '.join(recipients)}")
+            send_via_gmail(body_path, recipients)
+        elif args.smtp or smtp_is_configured():
+            log(f"Sending through SMTP to {', '.join(recipients)}")
+            send_via_smtp(body_path, recipients)
         else:
+            log("SMTP is not configured; falling back to Gmail web")
             log(f"Sending through Gmail web to {', '.join(recipients)}")
             send_via_gmail(body_path, recipients)
         if args.test:
