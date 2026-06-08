@@ -309,12 +309,12 @@ def extract_meta_description(page: str) -> str:
     return ""
 
 
-def extract_article_text(url: str, fallback: str) -> str:
+def extract_article_text(url: str, fallback: str) -> dict:
     try:
         page = decode_html(fetch_url(url, timeout=15))
     except Exception as exc:
         log(f"Article fetch failed: {url}: {exc}")
-        return fallback
+        return {"text": fallback, "kind": "summary"}
     page = re.sub(r"(?is)<(script|style|noscript|svg|header|footer|nav|aside)[^>]*>.*?</\1>", " ", page)
     paragraphs = []
     for paragraph in re.findall(r"(?is)<p[^>]*>(.*?)</p>", page):
@@ -324,14 +324,13 @@ def extract_article_text(url: str, fallback: str) -> str:
         if any(skip in text.lower() for skip in ["cookie", "subscribe", "newsletter", "advertisement", "sign up"]):
             continue
         paragraphs.append(text)
-        if len(" ".join(paragraphs)) >= 1400:
-            break
     article = " ".join(paragraphs).strip()
-    if len(article) < 160:
-        article = extract_meta_description(page)
-    if len(article) < 80:
-        article = fallback
-    return re.sub(r"\s+", " ", article).strip()[:1800]
+    if len(article) >= 300:
+        return {"text": re.sub(r"\s+", " ", article).strip(), "kind": "article"}
+    description = extract_meta_description(page)
+    if len(description) >= 80:
+        return {"text": description, "kind": "summary"}
+    return {"text": fallback, "kind": "summary"}
 
 
 def translate_to_chinese(text: str) -> str:
@@ -339,7 +338,7 @@ def translate_to_chinese(text: str) -> str:
         return text
     chunks = [text[i : i + 1200] for i in range(0, len(text), 1200)]
     translated_chunks = []
-    for chunk in chunks[:2]:
+    for chunk in chunks:
         query = urllib.parse.urlencode(
             {
                 "client": "gtx",
@@ -602,6 +601,46 @@ def select_items(items: list[dict]) -> list[dict]:
     return selected[:ITEM_LIMIT]
 
 
+def get_article_extraction(item: dict) -> dict:
+    if "_article_extraction" in item:
+        return item["_article_extraction"]
+    title = item.get("title", "")
+    summary = clean_text(item.get("summary", ""))
+    fallback = summary or title
+    extraction = extract_article_text(item.get("url", ""), fallback)
+    original_text = extraction["text"]
+    if "comprehensive up-to-date news coverage" in original_text.lower() or "由 google 新闻" in original_text.lower():
+        extraction = {"text": fallback, "kind": "summary"}
+    item["_article_extraction"] = extraction
+    return extraction
+
+
+def prefer_full_article_items(selected: list[dict], candidates: list[dict]) -> list[dict]:
+    full_articles: list[dict] = []
+    seen: set[str] = set()
+    for item in selected + candidates:
+        url = item.get("url", "")
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        try:
+            extraction = get_article_extraction(item)
+        except Exception as exc:
+            log(f"Article extraction failed while selecting: {url}: {exc}")
+            continue
+        if extraction.get("kind") == "article":
+            full_articles.append(item)
+            if len(full_articles) == ITEM_LIMIT:
+                return full_articles
+
+    for item in selected:
+        if item not in full_articles:
+            full_articles.append(item)
+        if len(full_articles) == ITEM_LIMIT:
+            break
+    return full_articles[:ITEM_LIMIT]
+
+
 def stars(item: dict, index: int) -> str:
     if index < 4 or item.get("score", 0) >= 18:
         return "★★★★★"
@@ -663,34 +702,25 @@ def infer_topic(item: dict) -> tuple[str, str, str, str]:
 
 
 def article_detail(item: dict) -> str:
-    title = item.get("title", "")
-    fallback = clean_text(f"{title}. {item.get('summary', '')}")
-    original_text = extract_article_text(item.get("url", ""), fallback)
-    if "comprehensive up-to-date news coverage" in original_text.lower() or "由 google 新闻" in original_text.lower():
-        original_text = fallback
+    extraction = get_article_extraction(item)
+    original_text = extraction["text"]
     translated_text = translate_to_chinese(original_text)
+    if extraction["kind"] == "article":
+        if has_chinese(original_text):
+            return f"原文内容：{translated_text}"
+        return f"原文全文直译：{translated_text}"
     if has_chinese(original_text):
-        return f"原文内容：{translated_text}"
-    return f"原文直译：{translated_text}"
+        return f"来源摘要内容：{translated_text}"
+    return f"来源摘要直译：{translated_text}"
 
 
 def chinese_summary(item: dict, index: int) -> str:
     source = item.get("source", "公开来源")
     topic, context, impact, watch = infer_topic(item)
-    rank_note = [
-        "它排在今天前列，说明这不是一条孤立新闻，而是和近期 AI 行业的主线变化有关。",
-        "它的价值在于提供了一个观察窗口，可以用来判断相关公司和赛道是否正在形成真实动能。",
-        "它未必马上改变市场格局，但能帮助我们识别接下来几周需要持续跟踪的方向。",
-        "它值得放进趋势列表，是因为背后牵涉到产品、资本、技术和用户采用之间的联动。",
-    ][index % 4]
     return (
-        f"解读：这条消息来自 {source}，主题可以归入“{topic}”。"
-        f"{context}{rank_note}"
-        "看这类消息时，重点不是把它当成普通新闻浏览一遍，而是要拆成三个层面理解。第一，它说明相关公司正在把 AI 能力继续往真实产品、真实客户或真实基础设施里推进；第二，它会影响产业链上其他参与者的判断，例如开发者是否跟进新平台，企业是否调整采购计划，创业公司是否重新选择切入点；第三，它也会暴露落地难点，包括成本、稳定性、数据安全、合规、渠道和用户习惯。"
-        f"{impact}"
-        "对普通读者来说，最实用的看法是：如果这类进展连续多次出现，就说明行业重心正在迁移；如果只有一次发布、缺少客户案例和后续数据，就要谨慎看待。"
-        f"{watch}"
-        "因此，这条不是只看热闹的新闻，而是可以作为今天观察 AI 竞争方向、商业化节奏和落地难度的一条信号。"
+        f"解读：这条消息来自 {source}，主题属于“{topic}”。"
+        f"{context}{impact}"
+        f"后续重点看：{watch}"
     )
 
 
@@ -1074,6 +1104,7 @@ def main() -> int:
     if len(items) < ITEM_LIMIT:
         log(f"Only collected {len(items)} eligible items; continuing with available items")
     selected = select_items(items)
+    selected = prefer_full_article_items(selected, items)
     if not selected:
         raise RuntimeError("No AI news items collected.")
 
