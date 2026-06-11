@@ -1051,6 +1051,45 @@ def mail_style_commands(styles: list[dict] | None) -> str:
     return "\n".join(commands)
 
 
+def apple_color_to_css(color: list[int]) -> str:
+    rgb = [max(0, min(255, round(value / 65535 * 255))) for value in color]
+    return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
+
+
+def style_to_css(style: dict) -> str:
+    declarations = []
+    if "color" in style:
+        declarations.append(f"color: {apple_color_to_css(style['color'])}")
+    if "font" in style:
+        declarations.append("font-weight: 700")
+    return "; ".join(declarations)
+
+
+def body_to_html(body: str, styles: list[dict] | None = None) -> str:
+    styles = sorted(styles or [], key=lambda item: item["start"])
+    pieces = []
+    cursor = 0
+    for style in styles:
+        start = max(0, style["start"] - 1)
+        end = min(len(body), style["end"])
+        if start > cursor:
+            pieces.append(html.escape(body[cursor:start]))
+        if end > start:
+            css = style_to_css(style)
+            pieces.append(f'<span style="{css}">{html.escape(body[start:end])}</span>')
+        cursor = max(cursor, end)
+    if cursor < len(body):
+        pieces.append(html.escape(body[cursor:]))
+    content = "".join(pieces)
+    return (
+        '<!doctype html><html><body>'
+        '<div style="font-family: -apple-system, BlinkMacSystemFont, '
+        "'PingFang SC', 'Microsoft YaHei', Arial, sans-serif; "
+        'font-size: 15px; line-height: 1.65; white-space: pre-wrap; color: #111;">'
+        f"{content}</div></body></html>"
+    )
+
+
 def send_one_via_mail(body_path: Path, recipient: str, styles: list[dict] | None = None, timeout: int = 180) -> None:
     escaped_path = str(body_path).replace('"', '\\"')
     style_commands = mail_style_commands(styles)
@@ -1098,7 +1137,7 @@ def send_via_mail(body_path: Path, recipients: list[str], styles: list[dict] | N
         raise RuntimeError("Some Mail sends failed: " + " | ".join(failures))
 
 
-def send_via_smtp(body_path: Path, recipients: list[str]) -> None:
+def send_via_smtp(body_path: Path, recipients: list[str], styles: list[dict] | None = None) -> None:
     config = load_smtp_config()
     missing = [key for key in ["host", "port", "user", "from", "password"] if not config.get(key)]
     if missing:
@@ -1109,6 +1148,7 @@ def send_via_smtp(body_path: Path, recipients: list[str]) -> None:
         )
 
     body = body_path.read_text("utf-8")
+    html_body = body_to_html(body, styles)
     failures = []
     for recipient in recipients:
         log(f"Sending SMTP message to {recipient}")
@@ -1117,6 +1157,7 @@ def send_via_smtp(body_path: Path, recipients: list[str]) -> None:
         message["To"] = recipient
         message["Subject"] = SUBJECT
         message.set_content(body)
+        message.add_alternative(html_body, subtype="html")
         try:
             with smtplib.SMTP(config["host"], int(config["port"]), timeout=60) as smtp:
                 smtp.ehlo()
@@ -1229,7 +1270,7 @@ def main() -> int:
             send_via_gmail(body_path, recipients)
         elif args.smtp or smtp_is_configured():
             log(f"Sending through SMTP to {', '.join(recipients)}")
-            send_via_smtp(body_path, recipients)
+            send_via_smtp(body_path, recipients, styles)
         else:
             log("SMTP is not configured; falling back to Gmail web")
             log(f"Sending through Gmail web to {', '.join(recipients)}")
