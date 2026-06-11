@@ -704,7 +704,7 @@ def infer_topic(item: dict) -> tuple[str, str, str, str]:
 def article_detail(item: dict) -> str:
     extraction = get_article_extraction(item)
     original_text = extraction["text"]
-    translated_text = translate_to_chinese(original_text)
+    translated_text = get_translated_extraction(item)
     if extraction["kind"] == "article":
         if has_chinese(original_text):
             return f"原文内容：{translated_text}"
@@ -714,13 +714,119 @@ def article_detail(item: dict) -> str:
     return f"来源摘要直译：{translated_text}"
 
 
+def get_translated_extraction(item: dict) -> str:
+    if "_translated_extraction" not in item:
+        extraction = get_article_extraction(item)
+        item["_translated_extraction"] = translate_to_chinese(extraction["text"])
+    return item["_translated_extraction"]
+
+
+def split_sentences(text: str) -> list[str]:
+    candidates = re.split(r"(?<=[。！？；.!?;])\s*", text)
+    return [sentence.strip() for sentence in candidates if len(sentence.strip()) >= 18]
+
+
+def compact_fact(text: str, limit: int = 130) -> str:
+    sentences = split_sentences(text)
+    if not sentences:
+        return text[:limit].strip()
+    fact = sentences[0]
+    if len(fact) < 55 and len(sentences) > 1 and sentences[1] != sentences[0]:
+        fact = f"{fact}{sentences[1]}"
+    return fact[:limit].strip()
+
+
+def named_subject(item: dict, translated_text: str) -> str:
+    title_text = item.get("title", "").lower()
+    body_text = translated_text.lower()
+    subjects = [
+        ("openai", "OpenAI"),
+        ("xai", "xAI"),
+        ("grok", "Grok"),
+        ("anthropic", "Anthropic"),
+        ("claude", "Claude"),
+        ("google", "Google"),
+        ("deepmind", "Google DeepMind"),
+        ("gemini", "Gemini"),
+        ("microsoft", "Microsoft"),
+        ("nvidia", "NVIDIA"),
+        ("neura", "NEURA Robotics"),
+        ("notion", "Notion"),
+        ("qwen", "通义千问"),
+        ("alibaba", "阿里"),
+        ("doubao", "豆包"),
+        ("bytedance", "字节跳动"),
+        ("deepseek", "DeepSeek"),
+        ("robot", "机器人公司"),
+        ("robots", "机器人公司"),
+    ]
+    matched = [label for keyword, label in subjects if keyword in title_text]
+    if not matched:
+        matched = [label for keyword, label in subjects if keyword in body_text]
+    return "、".join(dict.fromkeys(matched[:3])) or "相关公司"
+
+
+def specific_watchpoint(item: dict, translated_text: str) -> str:
+    title = item.get("title", "").lower()
+    text = f"{title} {translated_text}".lower()
+    if any(word in title for word in ["lawsuit", "fired", "safety"]):
+        return "看后续诉讼材料、内部安全流程和管理层回应，因为这会影响外界对模型公司治理能力的判断。"
+    if "conscious" in title:
+        return "看头部公司会不会收紧产品话术和研究表达，因为“AI 是否有意识”的叙事会影响用户预期、监管态度和品牌风险。"
+    if any(word in title for word in ["local ai", "diffusiongemma", "on-device"]):
+        return "看本地运行的速度、硬件门槛和真实应用质量，因为这决定它是技术演示还是能进入个人电脑和边缘设备。"
+    if any(word in title for word in ["robotics", "robots", "humanoid", "physical ai"]):
+        if any(word in title for word in ["funding", "raises", "raise", "series"]):
+            return "看这笔钱是否能换来可交付的机器人产品、量产能力和真实客户，而不只是继续推高具身智能估值。"
+        return "看真实环境里的失败率、部署成本和安全边界，因为机器人行业很难像纯软件模型那样快速复制扩张。"
+    if any(word in text for word in ["outage", "disruption", "restores access", "中断", "恢复访问"]):
+        return "看后续是否披露故障边界、替代方案和客户补偿，因为这直接关系到企业是否敢把核心工作流托付给单一 AI 服务。"
+    if any(word in text for word in ["funding", "raises", "valuation", "融资", "估值", "投资"]):
+        return "看融资后能否转化为产品交付和真实收入，而不是只停留在估值叙事。"
+    if any(word in text for word in ["launch", "release", "unveil", "open", "发布", "推出", "开放", "上线"]):
+        return "看这个新产品或新能力是否能进入日常使用场景，尤其是价格、易用性和稳定性是否跟得上。"
+    if any(word in text for word in ["partner", "partnership", "hub", "collaboration", "合作", "中心", "hub"]):
+        return "看合作或新中心能否带来可复制的客户案例，而不只是品牌展示和生态表态。"
+    if any(word in text for word in ["robot", "robots", "manufacturing", "worker", "机器人", "制造", "工人"]):
+        return "看它在真实工厂里的良率、节拍、安全责任和维护成本，这些比演示视频更能说明商业价值。"
+    if any(word in text for word in ["chip", "gpu", "inference", "data center", "芯片", "算力", "推理", "数据中心"]):
+        return "看单位推理成本和供给稳定性，因为这会直接决定 AI 产品能不能大规模便宜地提供。"
+    return "看后续是否有客户、收入、使用量或技术指标的持续验证，避免只被单次发布带动情绪。"
+
+
+def specific_meaning(item: dict, translated_text: str) -> str:
+    title = item.get("title", "").lower()
+    text = f"{title} {translated_text}".lower()
+    if any(word in title for word in ["lawsuit", "fired", "safety"]):
+        return "这不是普通人事纠纷，而是模型公司内部安全意见、商业压力和治理透明度之间的冲突被公开化。"
+    if "conscious" in title:
+        return "这篇文章的重点不是争论模型真的有没有意识，而是 AI 公司如何描述模型，会反过来塑造用户信任、监管关注和产品责任边界。"
+    if any(word in title for word in ["local ai", "diffusiongemma", "on-device"]):
+        return "它说明 AI 竞争正在从云端大模型能力，延伸到本地设备能否低延迟、低成本运行生成模型。"
+    if any(word in title for word in ["robotics", "robots", "humanoid", "physical ai"]):
+        if any(word in title for word in ["funding", "raises", "raise", "series"]):
+            return "这条消息的核心是资本继续押注 physical AI，但机器人公司的难点会从演示能力转向量产、交付和售后体系。"
+        return "这篇文章强调机器人不会像 Llama 这类软件模型一样出现清晰的开源拐点，因为硬件、传感器、场景和安全约束都会拖慢复制速度。"
+    if any(word in text for word in ["outage", "disruption", "restores access", "中断", "恢复访问"]):
+        return "它提醒企业客户，AI 工具一旦嵌入工作流，服务稳定性和供应商依赖就会变成实际运营风险。"
+    if any(word in text for word in ["funding", "raises", "valuation", "融资", "估值", "投资"]):
+        return "这条消息要看融资背后的商业兑现能力，尤其是客户、收入和成本结构是否支撑估值。"
+    if any(word in text for word in ["launch", "release", "unveil", "发布", "推出", "上线"]):
+        return "它的看点在于新能力能不能从发布稿进入真实使用，而不是只增加一个短期热点。"
+    return "它的价值在于提供了一个具体观察点，用来判断 AI 能力是否正在进入真实产品、真实客户或真实基础设施。"
+
+
 def chinese_summary(item: dict, index: int) -> str:
     source = item.get("source", "公开来源")
     topic, context, impact, watch = infer_topic(item)
+    translated_text = get_translated_extraction(item)
+    fact = compact_fact(translated_text)
+    meaning = specific_meaning(item, translated_text)
+    watchpoint = specific_watchpoint(item, translated_text)
     return (
-        f"解读：这条消息来自 {source}，主题属于“{topic}”。"
-        f"{context}{impact}"
-        f"后续重点看：{watch}"
+        f"解读：这篇来自 {source} 的文章，具体讲的是：{fact}"
+        f"放在“{topic}”里看，{meaning}"
+        f"{watchpoint}"
     )
 
 
