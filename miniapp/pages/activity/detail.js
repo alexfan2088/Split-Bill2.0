@@ -1800,10 +1800,55 @@ Page({
       addGreenNote(`${noIncomeExpenseMembers.join('、')} 没有产生消费和支出`);
     }
 
+    const attachmentPages = [];
+    bills.forEach((bill) => {
+      const attachments = Array.isArray(bill.attachments) ? bill.attachments : [];
+      const fileIDs = attachments.map(item => {
+        if (!item) return '';
+        if (typeof item === 'string') return item;
+        return item.fileID || '';
+      }).filter(Boolean);
+      if (!fileIDs.length) return;
+
+      fileIDs.forEach((fileID) => {
+        attachmentPages.push({
+          type: 'attachment',
+          fileID,
+          billTitle: bill.title || '未命名',
+          billDate: this.formatBillDate(bill),
+          billAmount: `¥${this.formatAmount(bill.amount || 0)}`,
+          payer: (bill.billshow || bill.payer) || ''
+        });
+      });
+    });
+
+    attachmentPages.forEach((page, index) => {
+      pages.push({
+        ...page,
+        attachmentIndex: index + 1,
+        attachmentTotal: attachmentPages.length
+      });
+    });
+
     return { pages, pageWidth, pageHeight, padding, lineHeight };
   },
 
   renderPdfPage(ctx, lines, padding, lineHeight) {
+    if (!Array.isArray(lines)) {
+      const page = lines || {};
+      ctx.save();
+      ctx.setTextAlign('left');
+      ctx.setTextBaseline('top');
+      ctx.setFontSize(26);
+      ctx.setFillStyle('#1d4ed8');
+      ctx.fillText(`附件图片 ${page.attachmentIndex || ''}`, padding, padding);
+      ctx.setFontSize(20);
+      ctx.setFillStyle('#111111');
+      ctx.fillText(`账单：${page.billTitle || '未命名'}`, padding, padding + lineHeight * 2);
+      ctx.fillText('图片将在 PDF 中嵌入显示', padding, padding + lineHeight * 3);
+      ctx.restore();
+      return;
+    }
     lines.forEach((line, index) => {
       const y = padding + index * lineHeight;
       const fontSize = line.fontSize || 18;
