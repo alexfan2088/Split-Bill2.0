@@ -714,29 +714,32 @@ Page({
   // 计算日期范围
   calculateDateRange(bills) {
     if (bills.length === 0) return '至今';
-    
-    let earliestDate = null;
+
+    let firstBillDate = null;
+    let lastBillDate = null;
     bills.forEach(b => {
-      const billDate = b.time ? (b.time.getTime ? b.time : new Date(b.time)) : 
+      const billDate = b.time ? (b.time.getTime ? b.time : new Date(b.time)) :
                       (b.createdAt ? (b.createdAt.getTime ? b.createdAt : new Date(b.createdAt)) : null);
-      if (billDate) {
-        if (!earliestDate || billDate < earliestDate) {
-          earliestDate = billDate;
+      if (billDate && !Number.isNaN(billDate.getTime())) {
+        if (!firstBillDate || billDate < firstBillDate) {
+          firstBillDate = billDate;
+        }
+        if (!lastBillDate || billDate > lastBillDate) {
+          lastBillDate = billDate;
         }
       }
     });
-    
-    if (!earliestDate) return '至今';
-    
+
+    if (!firstBillDate || !lastBillDate) return '至今';
+
     const formatDate = (d) => {
       const year = d.getFullYear();
       const month = String(d.getMonth() + 1).padStart(2, '0');
       const day = String(d.getDate()).padStart(2, '0');
       return `${year}-${month}-${day}`;
     };
-    
-    const today = new Date();
-    return `${formatDate(earliestDate)} 至 ${formatDate(today)}`;
+
+    return `${formatDate(firstBillDate)} 至 ${formatDate(lastBillDate)}`;
   },
   
   // 获取建议买单人员（余额最小的成员）
