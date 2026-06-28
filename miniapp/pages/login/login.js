@@ -16,6 +16,10 @@ Page({
     lastUserName: '', // 记录上次输入的用户名
     isRegisterMode: false, // false: 登录模式, true: 注册模式
     hasSavedUser: false, // 是否有保存的用户信息
+    userNameChecking: false,
+    userNameAvailable: null,
+    userNameCheckText: '',
+    suggestedUserNames: [],
   },
   
   onShareAppMessage() {
@@ -64,9 +68,22 @@ Page({
       });
     }
   },
+
+  onUnload() {
+    if (this._userNameCheckTimer) {
+      clearTimeout(this._userNameCheckTimer);
+      this._userNameCheckTimer = null;
+    }
+    this._userNameCheckRequestId = (this._userNameCheckRequestId || 0) + 1;
+  },
   
   // 切换到注册模式
   switchToRegister() {
+    if (this._userNameCheckTimer) {
+      clearTimeout(this._userNameCheckTimer);
+      this._userNameCheckTimer = null;
+    }
+    this._userNameCheckRequestId = (this._userNameCheckRequestId || 0) + 1;
     this.setData({
       isRegisterMode: true,
       userName: '',
@@ -76,12 +93,21 @@ Page({
       showConfirmPassword: true,
       showPasswordText: false,
       statusText: '注册新账号',
-      statusTextColor: 'orange'
+      statusTextColor: 'orange',
+      userNameChecking: false,
+      userNameAvailable: null,
+      userNameCheckText: '',
+      suggestedUserNames: []
     });
   },
   
   // 切换到登录模式
   switchToLogin() {
+    if (this._userNameCheckTimer) {
+      clearTimeout(this._userNameCheckTimer);
+      this._userNameCheckTimer = null;
+    }
+    this._userNameCheckRequestId = (this._userNameCheckRequestId || 0) + 1;
     const userName = wx.getStorageSync('aa_user_name');
     const savedPassword = db.getSavedLoginPassword();
     
@@ -93,13 +119,23 @@ Page({
       showConfirmPassword: false,
       showPasswordText: false,
       statusText: userName && savedPassword ? '已自动填入保存的密码' : (userName ? '已保存用户名，请输入密码登录' : '请输入用户名和密码登录'),
-      statusTextColor: 'blue'
+      statusTextColor: 'blue',
+      userNameChecking: false,
+      userNameAvailable: null,
+      userNameCheckText: '',
+      suggestedUserNames: []
     });
   },
   
   onUserNameInput(e) {
     const userName = e.detail.value.trim();
-    this.setData({ userName });
+    this.setData({
+      userName,
+      userNameChecking: false,
+      userNameAvailable: null,
+      userNameCheckText: '',
+      suggestedUserNames: []
+    });
     
     // 如果用户名改变，重置错误计数
     if (userName !== this.data.lastUserName && this.data.passwordErrorCount[userName]) {
@@ -111,6 +147,119 @@ Page({
     
     // 清空状态文本
     this.setData({ statusText: '', statusTextColor: '' });
+
+    if (this._userNameCheckTimer) {
+      clearTimeout(this._userNameCheckTimer);
+      this._userNameCheckTimer = null;
+    }
+    if (this.data.isRegisterMode && userName) {
+      this._userNameCheckTimer = setTimeout(() => {
+        this.checkUserNameAvailability(userName);
+      }, 400);
+    }
+  },
+
+  validateUserName(userName) {
+    const value = String(userName || '').trim();
+    if (!value) return '请输入用户名';
+    if (value.length < 2 || value.length > 20) return '用户名长度应为2至20个字符';
+    if (!/^[A-Za-z0-9_\u4e00-\u9fa5]+$/.test(value)) {
+      return '用户名仅支持中文、字母、数字和下划线';
+    }
+    return '';
+  },
+
+  buildUserNameCandidates(userName) {
+    const suffixes = Array.from({ length: 20 }, (_, index) => String(index + 1).padStart(2, '0'));
+    return suffixes.map((suffix) => {
+      const base = userName.slice(0, Math.max(1, 20 - suffix.length));
+      return `${base}${suffix}`;
+    });
+  },
+
+  async checkUserNameAvailability(inputName) {
+    const userName = String(inputName !== undefined ? inputName : this.data.userName).trim();
+    const validationError = this.validateUserName(userName);
+    const requestId = (this._userNameCheckRequestId || 0) + 1;
+    this._userNameCheckRequestId = requestId;
+
+    if (validationError) {
+      this.setData({
+        userNameChecking: false,
+        userNameAvailable: false,
+        userNameCheckText: validationError,
+        suggestedUserNames: []
+      });
+      return { checked: true, available: false, error: validationError };
+    }
+
+    this.setData({
+      userNameChecking: true,
+      userNameAvailable: null,
+      userNameCheckText: '正在检查用户名...',
+      suggestedUserNames: []
+    });
+
+    try {
+      const dbCloud = wx.cloud.database();
+      const userRes = await dbCloud.collection('users')
+        .where({ name: userName })
+        .limit(1)
+        .get();
+      if (requestId !== this._userNameCheckRequestId || userName !== this.data.userName.trim()) {
+        return { checked: false, available: false };
+      }
+
+      if (!userRes.data || userRes.data.length === 0) {
+        this.setData({
+          userNameChecking: false,
+          userNameAvailable: true,
+          userNameCheckText: `用户名“${userName}”可用`,
+          suggestedUserNames: []
+        });
+        return { checked: true, available: true };
+      }
+
+      const candidates = this.buildUserNameCandidates(userName);
+      const candidateRes = await dbCloud.collection('users')
+        .where({ name: dbCloud.command.in(candidates) })
+        .get();
+      if (requestId !== this._userNameCheckRequestId || userName !== this.data.userName.trim()) {
+        return { checked: false, available: false };
+      }
+      const occupied = new Set((candidateRes.data || []).map(item => item.name));
+      const suggestions = candidates.filter(name => !occupied.has(name)).slice(0, 3);
+      this.setData({
+        userNameChecking: false,
+        userNameAvailable: false,
+        userNameCheckText: `用户名“${userName}”已被占用`,
+        suggestedUserNames: suggestions
+      });
+      return { checked: true, available: false, suggestions };
+    } catch (e) {
+      console.error('检查用户名失败:', e);
+      if (requestId === this._userNameCheckRequestId) {
+        this.setData({
+          userNameChecking: false,
+          userNameAvailable: null,
+          userNameCheckText: '暂时无法检查用户名，请稍后重试',
+          suggestedUserNames: []
+        });
+      }
+      return { checked: false, available: false, error: e.message || '检查失败' };
+    }
+  },
+
+  onSuggestedUserNameTap(e) {
+    const userName = String(e.currentTarget.dataset.name || '').trim();
+    if (!userName) return;
+    this.setData({
+      userName,
+      userNameAvailable: null,
+      userNameCheckText: '',
+      suggestedUserNames: []
+    });
+    this.checkUserNameAvailability(userName);
   },
   
   onPasswordInput(e) {
@@ -241,39 +390,17 @@ Page({
       return;
     }
     
-    // 先检查用户是否已存在
-    wx.showLoading({
-      title: '检查中...'
-    });
-    
     try {
-      const dbCloud = wx.cloud.database();
-      const userRes = await dbCloud.collection('users')
-        .where({ name: userName })
-        .limit(1)
-        .get();
-      
-      wx.hideLoading();
-      
-      if (userRes.data && userRes.data.length > 0) {
-        // 用户已存在，提示登录
-        wx.showModal({
-          title: '提示',
-          content: '该用户名已注册，请使用登录功能',
-          showCancel: false,
-          confirmText: '去登录',
-          success: () => {
-            this.switchToLogin();
-            this.setData({
-              statusText: '该用户名已注册，请输入密码登录',
-              statusTextColor: 'blue'
-            });
-          }
-        });
+      const checkResult = await this.checkUserNameAvailability(userName);
+      if (!checkResult.checked) {
+        wx.showToast({ title: '用户名检查失败，请重试', icon: 'none' });
         return;
       }
-      
-      // 用户不存在，继续注册流程
+      if (!checkResult.available) {
+        wx.showToast({ title: checkResult.error || '该用户名已被占用', icon: 'none' });
+        return;
+      }
+
       if (!password) {
         wx.showToast({
           title: '请设置密码（至少6位）',

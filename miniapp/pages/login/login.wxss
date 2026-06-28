@@ -55,6 +55,53 @@
   border-color: #007bff;
 }
 
+.username-check {
+  margin-top: 14rpx;
+}
+
+.username-check-text {
+  display: block;
+  font-size: 24rpx;
+  line-height: 1.5;
+  color: #666;
+}
+
+.username-check-text.checking {
+  color: #666;
+}
+
+.username-check-text.available {
+  color: #16803c;
+  font-weight: bold;
+}
+
+.username-check-text.occupied {
+  color: #c62828;
+  font-weight: bold;
+}
+
+.username-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12rpx;
+  margin-top: 12rpx;
+}
+
+.username-suggestions-label {
+  font-size: 24rpx;
+  color: #555;
+}
+
+.username-suggestion {
+  padding: 8rpx 14rpx;
+  border: 2rpx solid #16803c;
+  border-radius: 8rpx;
+  color: #16803c;
+  font-size: 24rpx;
+  line-height: 1.2;
+}
+
 .password-wrapper {
   position: relative;
   width: 100%;
@@ -104,5 +151,4 @@
   text-decoration: underline;
   cursor: pointer;
 }
-
 

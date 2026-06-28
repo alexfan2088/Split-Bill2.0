@@ -8,6 +8,21 @@
       <view class="form-item">
         <text class="label">用户名：</text>
         <input class="input" type="text" placeholder="输入你的名字，如：唐朝奎" value="{{userName}}" bindinput="onUserNameInput" />
+        <view wx:if="{{isRegisterMode && userNameCheckText}}" class="username-check">
+          <text class="username-check-text {{userNameChecking ? 'checking' : (userNameAvailable === true ? 'available' : (userNameAvailable === false ? 'occupied' : ''))}}">
+            {{userNameCheckText}}
+          </text>
+          <view wx:if="{{suggestedUserNames.length > 0}}" class="username-suggestions">
+            <text class="username-suggestions-label">可用用户名：</text>
+            <text
+              wx:for="{{suggestedUserNames}}"
+              wx:key="*this"
+              class="username-suggestion"
+              data-name="{{item}}"
+              bindtap="onSuggestedUserNameTap"
+            >{{item}}</text>
+          </view>
+        </view>
       </view>
       
       <view wx:if="{{showPassword}}" class="form-item">

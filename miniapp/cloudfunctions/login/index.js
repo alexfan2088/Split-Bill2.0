@@ -49,6 +49,16 @@ function hashPassword(password) {
   }
 }
 
+function validateUserName(userName) {
+  const value = String(userName || '').trim();
+  if (!value) return '请输入用户名';
+  if (value.length < 2 || value.length > 20) return '用户名长度应为2至20个字符';
+  if (!/^[A-Za-z0-9_\u4e00-\u9fa5]+$/.test(value)) {
+    return '用户名仅支持中文、字母、数字和下划线';
+  }
+  return '';
+}
+
 exports.main = async (event, context) => {
   const { action, userName, password, confirmPassword } = event;
   
@@ -121,6 +131,15 @@ exports.main = async (event, context) => {
     
     if (action === 'register') {
       // 注册：创建新用户
+      const userNameError = validateUserName(userName);
+      if (userNameError) {
+        return {
+          success: false,
+          error: userNameError,
+          invalidUserName: true
+        };
+      }
+
       // 检查用户是否已存在
       const userRes = await db.collection('users')
         .where({ name: userName })
