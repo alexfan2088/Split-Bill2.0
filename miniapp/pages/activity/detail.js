@@ -38,6 +38,9 @@ Page({
     pdfReminderDiffDays: 0,
     showPdfGuideModal: false,
     pdfGuideText: ''
+    ,isParent: false
+    ,childActivities: []
+    ,childCount: 0
   },
   
   onShareAppMessage() {
@@ -109,6 +112,10 @@ Page({
       }
 
       const activity = detail.activity;
+      if (activity.isParent) {
+        await this.loadParentActivityData(activityId, userName, passwordHash);
+        return;
+      }
       const bills = detail.bills || [];
       const recharges = activity.isPrepaid ? (detail.recharges || []) : [];
       const activityMeta = (activity.type || '') + ' | 成员：' + (activity.members || []).map(m => m.name).join('、');
@@ -310,6 +317,86 @@ Page({
     }
     
     wx.hideLoading();
+  },
+
+  async loadParentActivityData(activityId, userName, passwordHash) {
+    try {
+      const res = await wx.cloud.callFunction({
+        name: 'activityOps',
+        data: { action: 'getParentActivityDetail', activityId, userName, passwordHash }
+      });
+      const detail = (res && res.result) || {};
+      if (!detail.success) throw new Error(detail.error || '加载父活动失败');
+
+      const activity = detail.activity;
+      const children = detail.children || [];
+      const balancesByMember = {};
+      const allBills = [];
+      const childActivities = children.map(({ activity: child, bills = [], recharges = [] }) => {
+        const childBalances = this.calcBalances(child.members || [], bills, recharges, child.isPrepaid ? child.keeper : '');
+        Object.keys(childBalances).forEach(name => {
+          const source = childBalances[name];
+          const target = balancesByMember[name] || { paid: 0, shouldPay: 0, balance: 0 };
+          target.paid += Number(source.paid) || 0;
+          target.shouldPay += Number(source.shouldPay) || 0;
+          target.balance += Number(source.balance) || 0;
+          balancesByMember[name] = target;
+        });
+        (child.members || []).forEach(member => {
+          const name = typeof member === 'string' ? member : member.name;
+          if (name && !balancesByMember[name]) balancesByMember[name] = { paid: 0, shouldPay: 0, balance: 0 };
+        });
+        allBills.push(...bills.map(bill => ({ ...bill, childActivityName: child.name })));
+        const total = bills.reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
+        return {
+          _id: child._id,
+          name: child.name,
+          type: child.type || '',
+          total: this.formatAmount(total),
+          billCount: bills.length,
+          memberNamesText: (child.members || []).map(m => typeof m === 'string' ? m : m.name).filter(Boolean).join('、') || '暂无成员',
+          settlementText: Object.keys(childBalances).map(name => `${name}：¥${this.formatAmount(childBalances[name].balance)}`).join('  ')
+        };
+      });
+      const total = allBills.reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
+      const members = Object.keys(balancesByMember).map(name => {
+        const bal = balancesByMember[name];
+        return {
+          name,
+          bal: { paid: this.formatAmount(bal.paid), shouldPay: this.formatAmount(bal.shouldPay), balance: this.formatAmount(bal.balance) },
+          _balanceValue: bal.balance
+        };
+      }).sort((a, b) => a._balanceValue - b._balanceValue);
+      members.forEach(member => delete member._balanceValue);
+      const memberNames = members.map(member => member.name);
+      const displayActivity = { ...activity, members: memberNames.map(name => ({ name })) };
+      this.setData({
+        activity: displayActivity,
+        activityMeta: `父活动 | 参与成员：${memberNames.join('、') || '暂无成员'}`,
+        currentTab: 'summary',
+        isParent: true,
+        isCreator: activity.creator === userName,
+        isPrepaid: false,
+        bills: [],
+        rawBills: allBills,
+        rawRecharges: [],
+        recharges: [],
+        members,
+        total: this.formatAmount(total),
+        avg: '0.00',
+        dateRange: '',
+        childActivities,
+        childCount: childActivities.length,
+        totalRecharge: '0.00',
+        totalConsume: this.formatAmount(total),
+        remaining: '0.00'
+      });
+    } catch (e) {
+      console.error('加载父活动失败:', e);
+      wx.showToast({ title: e.message || '加载失败', icon: 'none' });
+    } finally {
+      wx.hideLoading();
+    }
   },
   
   // 生成圆圈数据
@@ -706,7 +793,7 @@ Page({
       const isCreator = bill.creator === userName;
 
       wx.navigateTo({
-        url: `/pages/bill/edit?activityId=${this.data.activityId}&billId=${bill._id}&readOnly=${!isCreator}`
+        url: `/pages/bill/edit?activityId=${bill.activityId || this.data.activityId}&billId=${bill._id}&readOnly=${!isCreator}`
       });
     }
   },
@@ -777,9 +864,24 @@ Page({
   },
   
   addBill() {
+    if (this.data.isParent) {
+      wx.showToast({ title: '父活动不能直接记账，请新增二级活动', icon: 'none' });
+      return;
+    }
     wx.navigateTo({
       url: `/pages/bill/edit?activityId=${this.data.activityId}`
     });
+  },
+
+  addChildActivity() {
+    wx.navigateTo({
+      url: `/pages/activity/create?parentId=${this.data.activityId}&parentName=${encodeURIComponent(this.data.activity.name || '')}`
+    });
+  },
+
+  openChildActivity(e) {
+    const id = e.currentTarget.dataset.id;
+    if (id) wx.navigateTo({ url: `/pages/activity/detail?id=${id}` });
   },
   
   viewBill(e) {
@@ -2113,6 +2215,7 @@ Page({
   
   // 添加充值
   addRecharge() {
+    if (this.data.isParent) return;
     wx.navigateTo({
       url: `/pages/recharge/add?activityId=${this.data.activityId}`
     });

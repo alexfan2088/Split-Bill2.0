@@ -5,6 +5,7 @@
         <view class="activity-title-row">
           <view class="activity-title {{isCreator ? 'creator-title' : ''}}">
             {{activity.name}}
+            <text wx:if="{{isParent}}" class="parent-tag">（父活动）</text>
             <text wx:if="{{isPrepaid}}" class="prepaid-tag">（预存）</text>
           </view>
           <button class="btn-edit-activity {{isCreator ? '' : 'disabled'}}" size="mini" bindtap="editActivity" disabled="{{!isCreator}}">编辑</button>
@@ -24,21 +25,23 @@
           <text class="summary-value amount">¥{{total}}</text>
         </view>
         <view class="summary-actions">
-          <button class="btn-download-activity" size="mini" bindtap="downloadActivityPdf">下载</button>
+          <button wx:if="{{!isParent}}" class="btn-download-activity" size="mini" bindtap="downloadActivityPdf">下载</button>
           <button wx:if="{{isCreator}}" class="btn-delete-activity" size="mini" bindtap="deleteActivity">删除</button>
         </view>
       </view>
       <view class="summary-info-item">
-        <text class="summary-label">{{dateRange}} | 账单数量：{{bills.length}} 条</text>
+        <text wx:if="{{isParent}}" class="summary-label">二级活动：{{childCount}} 个</text>
+        <text wx:else class="summary-label">{{dateRange}} | 账单数量：{{bills.length}} 条</text>
       </view>
     </view>
   </view>
   
-      <view class="tabs">
-    <view class="tab {{currentTab === 'bills' ? 'active' : ''}}" bindtap="switchTab" data-tab="bills">账单</view>
+  <view class="tabs">
+    <view wx:if="{{!isParent}}" class="tab {{currentTab === 'bills' ? 'active' : ''}}" bindtap="switchTab" data-tab="bills">账单</view>
     <view wx:if="{{isPrepaid}}" class="tab {{currentTab === 'recharge' ? 'active' : ''}}" bindtap="switchTab" data-tab="recharge">预存</view>
     <view class="tab {{currentTab === 'summary' ? 'active' : ''}}" bindtap="switchTab" data-tab="summary">结算</view>
-    <button class="btn-add-inline" bindtap="addBill">+账单</button>
+    <button wx:if="{{isParent}}" class="btn-add-inline" bindtap="addChildActivity">+二级活动</button>
+    <button wx:else class="btn-add-inline" bindtap="addBill">+账单</button>
   </view>
   
   <!-- 账单 Tab -->
@@ -121,6 +124,18 @@
   <!-- 结算 Tab -->
   <view wx:if="{{currentTab === 'summary'}}" class="tab-content">
     <view class="summary-content">
+      <view wx:if="{{isParent}}" class="child-activity-list">
+        <view class="section-title">二级活动结算</view>
+        <view wx:if="{{childActivities.length === 0}}" class="empty-tip">暂无二级活动，请先新增二级活动</view>
+        <view wx:for="{{childActivities}}" wx:key="_id" class="child-activity-item" bindtap="openChildActivity" data-id="{{item._id}}">
+          <view class="child-activity-main">
+            <view class="child-activity-name">{{item.name}}</view>
+            <view class="child-activity-meta">{{item.type}} | 成员：{{item.memberNamesText}}</view>
+            <view class="child-activity-settlement">结算：{{item.settlementText}}</view>
+          </view>
+          <view class="child-activity-total">¥{{item.total}}<text class="child-activity-count">{{item.billCount}} 条</text></view>
+        </view>
+      </view>
       <!-- 预存活动的特殊显示 -->
       <view wx:if="{{isPrepaid}}" class="prepaid-summary">
         <view class="prepaid-item">

@@ -38,6 +38,16 @@
   color: #007bff;
 }
 
+.parent-tag { font-size: 30rpx; color: #176b3a; }
+.child-activity-list { margin-bottom: 28rpx; }
+.child-activity-item { display: flex; justify-content: space-between; align-items: center; background: #fff; border: 1rpx solid #e8e8e8; border-radius: 10rpx; padding: 22rpx; margin-top: 16rpx; }
+.child-activity-main { flex: 1; min-width: 0; }
+.child-activity-name { color: #176b3a; font-size: 30rpx; font-weight: 600; }
+.child-activity-meta { margin-top: 8rpx; color: #777; font-size: 23rpx; }
+.child-activity-settlement { margin-top: 6rpx; color: #555; font-size: 23rpx; line-height: 1.45; }
+.child-activity-total { color: #137333; font-weight: bold; font-size: 29rpx; text-align: right; margin-left: 18rpx; }
+.child-activity-count { display: block; color: #888; font-size: 22rpx; font-weight: normal; margin-top: 6rpx; }
+
 .activity-creator {
   font-size: 26rpx;
   color: #666;

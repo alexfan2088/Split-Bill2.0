@@ -105,6 +105,11 @@ Page({
       // 加载活动的保管人员
       const actRes = await dbCloud.collection('activities').doc(activityId).get();
       const activity = actRes.data;
+      if (activity && activity.isParent) {
+        wx.showToast({ title: '父活动不能添加充值', icon: 'none' });
+        setTimeout(() => wx.navigateBack(), 1200);
+        return;
+      }
       const keeper = activity.keeper || '';
       
       this.setData({ 

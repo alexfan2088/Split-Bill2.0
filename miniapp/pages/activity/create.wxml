@@ -5,9 +5,19 @@
       <text class="label">活动名称</text>
       <input class="input" type="text" placeholder="例如：周末聚餐" value="{{name}}" bindinput="onNameInput" maxlength="20" />
     </view>
+
+    <view wx:if="{{!parentId}}" class="form-item">
+      <view class="switch-item">
+        <text class="switch-label">父活动</text>
+        <switch checked="{{isParent}}" bindchange="toggleParent" />
+      </view>
+      <view class="hint">父活动不能直接记账，参与人员和结算由二级活动自动汇总。</view>
+    </view>
+
+    <view wx:if="{{parentId}}" class="parent-notice">当前创建的是「{{parentName}}」下的二级活动</view>
     
 
-    <view class="form-item">
+    <view wx:if="{{!isParent}}" class="form-item">
       <text class="label">参与成员（<text class="label-highlight">逐个添加</text>）</text>
       <view class="hint">提示：创建者（{{creator}}）会自动添加在第一位，且不可删除</view>
       <view class="member-input-row">
@@ -37,7 +47,7 @@
       <textarea wx:else class="textarea textarea-remark" placeholder="可选" value="{{remark}}" bindinput="onRemarkInput" auto-height="{{true}}" />
     </view>
     
-    <view wx:if="{{showPrepaidOption}}" class="form-item">
+    <view wx:if="{{showPrepaidOption && !isParent}}" class="form-item">
       <view class="switch-item">
         <text class="switch-label">预存</text>
         <switch checked="{{isPrepaid}}" bindchange="togglePrepaid" disabled="{{isEdit && originalIsPrepaid}}" />
@@ -45,7 +55,7 @@
       <view wx:if="{{isEdit && originalIsPrepaid}}" class="switch-hint">创建时已选择预存，不可修改</view>
     </view>
     
-    <view wx:if="{{isPrepaid}}" class="form-item">
+    <view wx:if="{{isPrepaid && !isParent}}" class="form-item">
       <text class="label">保管人员</text>
       <view class="keeper-tags">
         <view wx:for="{{keeperList}}" wx:key="name" class="keeper-tag {{keeper === item.name ? 'active' : ''}}" bindtap="selectKeeper" data-name="{{item.name}}">

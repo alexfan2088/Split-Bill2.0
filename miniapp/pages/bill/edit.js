@@ -173,6 +173,11 @@ Page({
         const actRes = await dbCloud.collection('activities').doc(activityId).get();
         activity = actRes.data;
       }
+      if (activity && activity.isParent) {
+        wx.showToast({ title: '父活动不能直接记账，请进入二级活动', icon: 'none' });
+        setTimeout(() => wx.navigateBack(), 1200);
+        return;
+      }
       
       const payerList = members.map(m => ({
         name: typeof m === 'string' ? m : m.name

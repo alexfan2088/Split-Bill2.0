@@ -23,6 +23,9 @@ Page({
     commonTypes: ['聚餐', '秋秋妹', '麻将', '掼蛋', '公园'], // 常用类型（包含系统类型和自定义类型）
     remarkEditing: false, // 备注是否在编辑状态
     formattedRemark: [], // 格式化后的备注内容（用于显示高亮）
+    isParent: false,
+    parentId: '',
+    parentName: ''
   },
   
   onShareAppMessage() {
@@ -57,6 +60,10 @@ Page({
     // 加载常用类型列表（从数据库）
     await this.loadCommonTypes();
     
+    if (options.parentId) {
+      this.setData({ parentId: options.parentId, parentName: options.parentName || '' });
+    }
+
     if (options.id && options.data) {
       // 编辑模式
       try {
@@ -89,6 +96,7 @@ Page({
         memberNames.unshift(creator); // 将创建者添加到第一位
         
         const originalIsPrepaid = activity.isPrepaid || false;
+        const isParent = activity.isParent === true;
         this.setData({
           isEdit: true,
           activityId: activity._id,
@@ -102,6 +110,8 @@ Page({
           keeper: activity.keeper || '',
           creator: creator,
           originalMemberNames: memberNames,
+          isParent,
+          parentId: activity.parentId || '',
         });
         this.setMembersFromNames(memberNames);
         wx.setNavigationBarTitle({
@@ -136,6 +146,11 @@ Page({
   
   onNameInput(e) {
     this.setData({ name: e.detail.value });
+  },
+
+  toggleParent(e) {
+    const isParent = e.detail.value;
+    this.setData({ isParent, isPrepaid: isParent ? false : this.data.isPrepaid, keeper: isParent ? '' : this.data.keeper });
   },
   
   // 加载常用类型列表（从数据库）
@@ -600,6 +615,17 @@ Page({
     this.setData({ keeper });
   },
 
+  async refreshParentMembers(parentId, userName) {
+    const passwordHash = db.getCurrentUserPasswordHash();
+    if (!parentId || !passwordHash) return;
+    const res = await wx.cloud.callFunction({
+      name: 'activityOps',
+      data: { action: 'refreshParentMembers', parentId, userName, passwordHash }
+    });
+    const result = (res && res.result) || {};
+    if (!result.success) throw new Error(result.error || '更新父活动成员失败');
+  },
+
 
 
   
@@ -618,10 +644,11 @@ Page({
     }
     
     
-    // 使用当前成员列表
+    const isParent = this.data.isParent === true;
+    // 父活动不单独维护参与者，仅保留创建者用于访问控制；详情页会实时汇总子活动成员。
     let memberNames = (this.data.memberNames || []).slice();
     
-    if (memberNames.length === 0) {
+    if (!isParent && memberNames.length === 0) {
       wx.showToast({
         title: '请至少添加一个成员',
         icon: 'none'
@@ -651,7 +678,7 @@ Page({
       }
     });
     
-    if (duplicateNames.length > 0) {
+    if (!isParent && duplicateNames.length > 0) {
       wx.showModal({
         title: '提示',
         content: `参与成员有重名：${duplicateNames.join('、')}，请修改后重试。`,
@@ -662,7 +689,7 @@ Page({
     }
     
     // 如果是预存活动，必须选择保管人
-    if (this.data.isPrepaid && !this.data.keeper) {
+    if (!isParent && this.data.isPrepaid && !this.data.keeper) {
       wx.showModal({
         title: '提示',
         content: '预存活动必须选择保管人员，请选择后再保存。',
@@ -701,11 +728,12 @@ Page({
           name,
           type,
           remark,
-          isPrepaid: this.data.isPrepaid,
+          isPrepaid: isParent ? false : this.data.isPrepaid,
           members,
           memberNames,
           updatedAt: new Date()
         };
+        updateData.isParent = isParent;
         // 如果是预存活动，保存保管人员
         if (this.data.isPrepaid) {
           updateData.keeper = this.data.keeper;
@@ -735,6 +763,9 @@ Page({
           });
           return;
         }
+        if (this.data.parentId) {
+          await this.refreshParentMembers(this.data.parentId, userName);
+        }
         
         wx.hideLoading();
         wx.showToast({
@@ -748,12 +779,16 @@ Page({
           name,
           type,
           remark,
-          isPrepaid: this.data.isPrepaid,
+          isPrepaid: isParent ? false : this.data.isPrepaid,
+          isParent,
           members,
           memberNames,
           creator: userName,
           createdAt: new Date()
         };
+        if (this.data.parentId) {
+          createData.parentId = this.data.parentId;
+        }
         // 如果是预存活动，保存保管人员
         if (this.data.isPrepaid) {
           createData.keeper = this.data.keeper;
@@ -771,13 +806,17 @@ Page({
             updatedAt: new Date()
           }
         });
+
+        if (this.data.parentId) {
+          await this.refreshParentMembers(this.data.parentId, userName);
+        }
         
         wx.hideLoading();
         wx.showToast({
           title: '创建成功',
           icon: 'success'
         });
-      }
+  }
       
       // 如果输入了新类型，保存到常用类型列表
       if (type && !this.data.commonTypes.includes(type)) {

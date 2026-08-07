@@ -8,6 +8,7 @@ cloud.init({
 const db = cloud.database();
 const { deleteActivityRecords } = require('./deleteActivityCore');
 const { getActivityDetail } = require('./getActivityDetailCore');
+const { getParentActivityDetail, refreshParentMembers } = require('./parentActivityCore');
 
 // 密码哈希函数（与客户端保持一致）
 function hashPassword(password) {
@@ -288,6 +289,22 @@ exports.main = async (event) => {
       return await getActivityDetail(db, activityId, userName);
     }
 
+    if (action === 'getParentActivityDetail') {
+      const { activityId, userName, passwordHash, password } = event;
+      const auth = await verifyUser(userName, passwordHash, password);
+      if (!auth.ok) return { success: false, error: auth.error };
+      return await getParentActivityDetail(db, activityId, userName);
+    }
+
+    if (action === 'refreshParentMembers') {
+      const { parentId, userName, passwordHash, password } = event;
+      const auth = await verifyUser(userName, passwordHash, password);
+      if (!auth.ok) return { success: false, error: auth.error };
+      const parentDoc = await db.collection('activities').doc(parentId).get();
+      if (!parentDoc.data || parentDoc.data.creator !== userName) return { success: false, error: '只有父活动创建者可以更新成员' };
+      return await refreshParentMembers(db, parentId);
+    }
+
     if (action === 'deleteRecharge') {
       const { rechargeId, userName, passwordHash, password } = event;
       const auth = await verifyUser(userName, passwordHash, password);
@@ -369,6 +386,8 @@ exports.main = async (event) => {
           });
         }
       }
+
+      if (activity.parentId) await refreshParentMembers(db, activity.parentId);
 
       return { success: true };
     }
@@ -484,7 +503,13 @@ exports.main = async (event) => {
         return { success: false, error: '只有创建者可以删除活动' };
       }
 
+      if (activity.isParent) {
+        const children = await fetchAll(db, 'activities', { parentId: activityId });
+        for (const child of children) await deleteActivityRecords(db, child._id);
+      }
       await deleteActivityRecords(db, activityId);
+
+      if (activity.parentId) await refreshParentMembers(db, activity.parentId);
 
       return { success: true };
     }

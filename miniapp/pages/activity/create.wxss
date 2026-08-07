@@ -140,6 +140,15 @@
   margin-bottom: 8rpx;
 }
 
+.parent-notice {
+  margin-bottom: 32rpx;
+  padding: 18rpx 20rpx;
+  color: #176b3a;
+  background: #eefaf0;
+  border-radius: 8rpx;
+  font-size: 26rpx;
+}
+
 
 .type-tags {
   display: flex;

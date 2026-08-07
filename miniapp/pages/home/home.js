@@ -134,7 +134,8 @@ Page({
           memberNames: finalMemberNames, // 数组形式
           memberNamesText: memberNamesText, // 字符串形式，用于显示
           isCreator: act.creator === userName,
-          isPrepaid: isPrepaidValue // 是否预存活动
+          isPrepaid: isPrepaidValue, // 是否预存活动
+          isParent: act.isParent === true
         };
       }));
       
@@ -158,6 +159,7 @@ Page({
           creator: act.creator,
           isCreator: act.isCreator,
           isPrepaid: isPrepaid, // 是否预存活动
+          isParent: act.isParent === true,
           memberNames: act.memberNames,
           memberNamesText: memberText, // 确保这个字段存在
         };
@@ -296,5 +298,4 @@ Page({
     });
   },
 });
-
 

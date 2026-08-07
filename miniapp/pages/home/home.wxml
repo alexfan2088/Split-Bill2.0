@@ -21,6 +21,7 @@
       <view class="activity-header">
         <view class="activity-name {{item.isCreator ? 'creator-name' : ''}}">
           {{item.name}}
+          <text wx:if="{{item.isParent}}" class="prepaid-tag">（父活动）</text>
           <text wx:if="{{item.isPrepaid}}" class="prepaid-tag">（预存）</text>
         </view>
       </view>
@@ -31,5 +32,4 @@
     </view>
   </view>
 </view>
-
 
