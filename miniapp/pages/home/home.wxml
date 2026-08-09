@@ -3,13 +3,22 @@
 <view class="container">
   <view class="header">
     <view class="user-info">
-      <text class="user-label">当前用户：{{userName}}</text>
+      <text wx:if="{{userName}}" class="user-label">当前用户：{{userName}}</text>
+      <view wx:else class="guest-info">
+        <text class="user-label">游客模式：可先浏览功能说明</text>
+        <text class="login-link" bindtap="goLogin">登录/注册</text>
+      </view>
     </view>
   </view>
   
   <view class="page-header">
     <text class="page-title">活动列表</text>
     <button class="btn-add" bindtap="createActivity">+ 创建活动</button>
+  </view>
+
+  <view wx:if="{{!userName}}" class="guest-guide">
+    <text class="guest-guide-title">多人 AA 记账</text>
+    <text>支持创建活动、记录账单、成员分摊和结算。使用记账功能时，再由你主动选择注册或登录。</text>
   </view>
   
   <view class="activity-list">
@@ -32,4 +41,3 @@
     </view>
   </view>
 </view>
-

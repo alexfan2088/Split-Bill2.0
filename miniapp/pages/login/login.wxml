@@ -1,7 +1,7 @@
 <!--pages/login/login.wxml-->
 <view class="container">
   <view class="login-card">
-    <view class="title">AA 记账2.4.501</view>
+    <view class="title">AA 记账2.4.502</view>
     <view class="subtitle">题名登塔喜，醵宴为花忙</view>
     
     <view class="form">
@@ -41,8 +41,18 @@
       <view class="form-item">
         <text class="status-text {{statusTextColor}}">{{statusText}}</text>
       </view>
+
+      <view class="agreement-row">
+        <checkbox checked="{{hasAgreed}}" color="#16803c" bindchange="onAgreementChange" />
+        <view class="agreement-text">
+          <text>我已阅读并同意</text>
+          <text class="agreement-link" data-type="terms" bindtap="openLegal">《用户服务协议》</text>
+          <text>和</text>
+          <text class="agreement-link" data-type="privacy" bindtap="openLegal">《隐私政策》</text>
+        </view>
+      </view>
       
-      <button class="btn btn-full" bindtap="handleLoginOrRegister">{{isRegisterMode ? '注册' : '登录'}}</button>
+      <button class="btn btn-full" bindtap="handleLoginOrRegister" disabled="{{!hasAgreed}}">{{isRegisterMode ? '注册' : '登录'}}</button>
       
       <view class="form-item" style="margin-top: 20rpx; text-align: center;">
         <text class="link-text" bindtap="{{isRegisterMode ? 'switchToLogin' : 'switchToRegister'}}">

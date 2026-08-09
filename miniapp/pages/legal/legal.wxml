@@ -1,0 +1,25 @@
+<view class="container">
+  <view class="tabs">
+    <view class="tab {{type === 'terms' ? 'active' : ''}}" data-type="terms" bindtap="switchType">用户服务协议</view>
+    <view class="tab {{type === 'privacy' ? 'active' : ''}}" data-type="privacy" bindtap="switchType">隐私政策</view>
+  </view>
+
+  <view wx:if="{{type === 'terms'}}" class="content">
+    <view class="title">AA 记账用户服务协议</view>
+    <view class="date">生效日期：2026 年 8 月 10 日</view>
+    <view class="section"><text class="section-title">1. 服务内容</text><text>AA 记账提供活动创建、账单记录、参与成员分摊、预存和结算等多人记账服务。</text></view>
+    <view class="section"><text class="section-title">2. 账户使用</text><text>注册时需由你主动填写用户名和密码，用于账户识别与登录验证。请妥善保管账户信息，不得冒用他人身份或发布违法内容。</text></view>
+    <view class="section"><text class="section-title">3. 活动数据</text><text>你创建或加入活动后，活动参与者可查看该活动中的成员、账单和结算信息。请仅录入已取得授权的人员信息。</text></view>
+    <view class="section"><text class="section-title">4. 协议更新</text><text>服务或本协议发生重大变更时，将在小程序内更新提示；继续使用相关服务即表示你同意更新后的协议。</text></view>
+  </view>
+
+  <view wx:else class="content">
+    <view class="title">AA 记账隐私政策</view>
+    <view class="date">生效日期：2026 年 8 月 10 日</view>
+    <view class="section"><text class="section-title">1. 我们收集的信息</text><text>在你主动注册、登录和使用记账功能时，我们会处理：用户名、密码验证信息、活动名称/类型/备注、参与成员姓名、账单金额/付款人/分摊信息、充值和结算信息，以及你主动上传的账单附件（如有）。</text></view>
+    <view class="section"><text class="section-title">2. 使用目的</text><text>上述信息仅用于账户登录、保存活动账目、计算分摊与结算、向活动参与者展示对应活动数据，以及保障服务安全稳定。</text></view>
+    <view class="section"><text class="section-title">3. 不收集的信息</text><text>本小程序不要求授权获取你的手机号、微信头像或昵称；不以广告营销为目的收集个人信息。</text></view>
+    <view class="section"><text class="section-title">4. 存储与共享</text><text>数据存储于微信云开发服务。活动数据仅在对应活动参与者范围内使用；除法律法规要求外，不会向无关第三方出售或共享你的个人信息。</text></view>
+    <view class="section"><text class="section-title">5. 删除</text><text>活动创建者可在活动详情中删除活动及其关联账单、充值和成员分组数据。</text></view>
+  </view>
+</view>

@@ -24,16 +24,7 @@ Page({
   },
   
   onLoad() {
-    // 检查用户是否已登录
-    const userName = db.getCurrentUser();
-    if (!userName) {
-      // 未登录，跳转到登录页
-      wx.redirectTo({
-        url: '/pages/login/login'
-      });
-      return;
-    }
-    
+    // 首页允许游客浏览；仅在使用账户和记账功能时再主动登录。
     this.loadUserInfo();
     this.loadActivities();
   },
@@ -52,10 +43,7 @@ Page({
       this.setData({ userName });
       app.globalData.currentUserName = userName;
     } else {
-      // 未登录，跳转到登录页
-      wx.redirectTo({
-        url: '/pages/login/login'
-      });
+      this.setData({ userName: '' });
     }
   },
   
@@ -252,9 +240,17 @@ Page({
   },
   
   createActivity() {
+    if (!db.getCurrentUser()) {
+      wx.navigateTo({ url: '/pages/login/login' });
+      return;
+    }
     wx.navigateTo({
       url: '/pages/activity/create'
     });
+  },
+
+  goLogin() {
+    wx.navigateTo({ url: '/pages/login/login' });
   },
   
   openActivity(e) {
@@ -298,4 +294,3 @@ Page({
     });
   },
 });
-

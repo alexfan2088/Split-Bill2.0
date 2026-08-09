@@ -20,6 +20,8 @@ Page({
     userNameAvailable: null,
     userNameCheckText: '',
     suggestedUserNames: [],
+    hasAgreed: false,
+    policyVersion: '2026-08-10',
   },
   
   onShareAppMessage() {
@@ -38,6 +40,8 @@ Page({
   },
   
   onLoad() {
+    const policyVersion = this.data.policyVersion;
+    this.setData({ hasAgreed: wx.getStorageSync('aa_policy_agreed_version') === policyVersion });
     // 检查是否已保存用户信息
     const userName = wx.getStorageSync('aa_user_name');
     const savedPasswordHashed = wx.getStorageSync('aa_user_password');
@@ -275,9 +279,31 @@ Page({
       showPasswordText: !this.data.showPasswordText
     });
   },
+
+  onAgreementChange(e) {
+    const hasAgreed = !!e.detail.value.length;
+    this.setData({ hasAgreed });
+    if (hasAgreed) {
+      wx.setStorageSync('aa_policy_agreed_version', this.data.policyVersion);
+    } else {
+      wx.removeStorageSync('aa_policy_agreed_version');
+    }
+  },
+
+  openLegal(e) {
+    const type = e.currentTarget.dataset.type || 'privacy';
+    wx.navigateTo({ url: `/pages/legal/legal?type=${type}` });
+  },
+
+  ensureAgreement() {
+    if (this.data.hasAgreed) return true;
+    wx.showToast({ title: '请先阅读并同意服务协议和隐私政策', icon: 'none', duration: 2500 });
+    return false;
+  },
   
   // 处理登录
   async handleLogin() {
+    if (!this.ensureAgreement()) return;
     const userName = this.data.userName.trim();
     const password = this.data.password;
     
@@ -378,6 +404,7 @@ Page({
   
   // 处理注册
   async handleRegister() {
+    if (!this.ensureAgreement()) return;
     const userName = this.data.userName.trim();
     const password = this.data.password;
     const confirmPassword = this.data.confirmPassword;
