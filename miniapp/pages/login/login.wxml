@@ -1,13 +1,13 @@
 <!--pages/login/login.wxml-->
 <view class="container">
   <view class="login-card">
-    <view class="title">AA 记账2.4.502</view>
+    <view class="title">AA 记账2.4.504</view>
     <view class="subtitle">题名登塔喜，醵宴为花忙</view>
     
     <view class="form">
       <view class="form-item">
         <text class="label">用户名：</text>
-        <input class="input" type="text" placeholder="输入你的名字，如：唐朝奎" value="{{userName}}" bindinput="onUserNameInput" />
+        <input class="input" type="text" placeholder="输入你的名字，如：孙悟空" value="{{userName}}" bindinput="onUserNameInput" />
         <view wx:if="{{isRegisterMode && userNameCheckText}}" class="username-check">
           <text class="username-check-text {{userNameChecking ? 'checking' : (userNameAvailable === true ? 'available' : (userNameAvailable === false ? 'occupied' : ''))}}">
             {{userNameCheckText}}
