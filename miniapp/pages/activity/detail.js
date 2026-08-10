@@ -310,10 +310,25 @@ Page({
       
     } catch (e) {
       console.error('加载活动数据失败:', e);
-      wx.showToast({
-        title: '加载失败',
-        icon: 'none'
-      });
+      const message = (e && e.message) || '';
+      if (message.includes('仅父活动创建者可查看父活动')) {
+        wx.showToast({
+          title: '仅可查看参与的二级活动',
+          icon: 'none'
+        });
+        setTimeout(() => {
+          if (getCurrentPages().length > 1) {
+            wx.navigateBack();
+          } else {
+            wx.reLaunch({ url: '/pages/home/home' });
+          }
+        }, 1200);
+      } else {
+        wx.showToast({
+          title: '加载失败',
+          icon: 'none'
+        });
+      }
     }
     
     wx.hideLoading();
