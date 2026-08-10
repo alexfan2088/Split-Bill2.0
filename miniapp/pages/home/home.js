@@ -51,10 +51,35 @@ Page({
     wx.showLoading({ title: '加载中...' });
     
     try {
-      // 二级活动仅在所属父活动内展示，首页只显示独立活动和父活动。
-      const activities = (await db.getActivities()).filter(activity => !activity.parentId);
       const userName = db.getCurrentUser();
       const dbCloud = wx.cloud.database();
+      const allAccessibleActivities = await db.getActivities();
+      const childParentIds = [...new Set(allAccessibleActivities
+        .filter(activity => activity.parentId)
+        .map(activity => activity.parentId))];
+      const parentCreatorById = {};
+
+      // 父活动创建者在首页看到父活动；其他成员仅看到自己参与的二级活动。
+      // 查询结果仅用于判断展示权限，父活动名称和成员不会传入二级活动卡片。
+      for (let i = 0; i < childParentIds.length; i += 20) {
+        const ids = childParentIds.slice(i, i + 20);
+        try {
+          const parentRes = await dbCloud.collection('activities')
+            .where({ _id: dbCloud.command.in(ids) })
+            .get();
+          (parentRes.data || []).forEach(parent => {
+            parentCreatorById[parent._id] = parent.creator;
+          });
+        } catch (e) {
+          console.error('加载二级活动所属父活动失败:', e);
+        }
+      }
+
+      const activities = allAccessibleActivities.filter(activity => {
+        if (activity.isParent) return activity.creator === userName;
+        if (!activity.parentId) return true;
+        return parentCreatorById[activity.parentId] !== userName;
+      });
       
       // 为每个活动加载最新的成员列表（从groups集合）
       const activitiesWithMembers = await Promise.all(activities.map(async (act) => {

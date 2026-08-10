@@ -1,5 +1,3 @@
-const { canViewActivity } = require('./getActivityDetailCore');
-
 function getName(member) {
   return typeof member === 'string' ? member : member && member.name;
 }
@@ -25,12 +23,13 @@ async function hydrateMembers(db, activity) {
 async function getParentActivityDetail(db, parentId, userName) {
   const parentDoc = await db.collection('activities').doc(parentId).get();
   if (!parentDoc.data || !parentDoc.data.isParent) return { success: false, error: '父活动不存在' };
+  if (parentDoc.data.creator !== userName) {
+    return { success: false, error: '仅父活动创建者可查看父活动' };
+  }
 
   const children = await fetchAll(db, 'activities', { parentId });
   const hydratedChildren = await Promise.all(children.map(child => hydrateMembers(db, child)));
   const parent = await hydrateMembers(db, parentDoc.data);
-  const canView = canViewActivity(parent, userName) || hydratedChildren.some(child => canViewActivity(child, userName));
-  if (!canView) return { success: false, error: '无权查看该活动' };
 
   const details = await Promise.all(hydratedChildren.map(async child => ({
     activity: child,

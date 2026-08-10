@@ -63,6 +63,16 @@ async function run() {
 
   const denied = await getActivityDetail(db, activityId, 'outside');
   assert.deepStrictEqual(denied, { success: false, error: '无权查看该活动' });
+
+  const parentId = 'parent-1';
+  const parentDb = createFakeDb({
+    activities: [{ _id: parentId, creator: 'owner', isParent: true, members: [{ name: 'owner' }, { name: 'member' }] }],
+    groups: [{ activityId: parentId, members: [{ name: 'owner' }, { name: 'member' }] }],
+    bills: [],
+    recharges: []
+  });
+  const parentDenied = await getActivityDetail(parentDb, parentId, 'member');
+  assert.deepStrictEqual(parentDenied, { success: false, error: '仅父活动创建者可查看父活动' });
   console.log('ok - activity detail aggregates paged records and enforces membership');
 }
 
