@@ -155,7 +155,7 @@
         </view>
       </view>
       
-      <view class="member-list">
+      <view wx:if="{{!isParent}}" class="member-list">
         <view wx:for="{{members}}" wx:key="name" class="member-item" bindtap="onMemberTap" data-name="{{item.name}}">
           <view class="member-info">
             <view class="member-name">{{item.name}}</view>
