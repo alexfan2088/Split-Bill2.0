@@ -39,9 +39,24 @@ Page({
     };
   },
   
-  onLoad() {
+  onLoad(options = {}) {
     const policyVersion = this.data.policyVersion;
     this.setData({ hasAgreed: wx.getStorageSync('aa_policy_agreed_version') === policyVersion });
+    if (options.switchAccount === '1') {
+      this.setData({
+        userName: '',
+        password: '',
+        confirmPassword: '',
+        showPassword: true,
+        showConfirmPassword: false,
+        showPasswordText: false,
+        isRegisterMode: false,
+        hasSavedUser: false,
+        statusText: '请输入其他账号登录，或切换到注册新账号',
+        statusTextColor: 'blue'
+      });
+      return;
+    }
     // 检查是否已保存用户信息
     const userName = wx.getStorageSync('aa_user_name');
     const savedPasswordHashed = wx.getStorageSync('aa_user_password');
@@ -347,7 +362,7 @@ Page({
         
         // 跳转到首页
         setTimeout(() => {
-          wx.redirectTo({
+          wx.reLaunch({
             url: '/pages/home/home'
           });
         }, 1500);
@@ -479,7 +494,7 @@ Page({
         
         // 跳转到首页
         setTimeout(() => {
-          wx.redirectTo({
+          wx.reLaunch({
             url: '/pages/home/home'
           });
         }, 1500);

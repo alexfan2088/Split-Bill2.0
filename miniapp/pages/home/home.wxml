@@ -3,7 +3,10 @@
 <view class="container">
   <view class="header">
     <view class="user-info">
-      <text wx:if="{{userName}}" class="user-label">当前用户：{{userName}}</text>
+      <view wx:if="{{userName}}" class="signed-in-info">
+        <text class="user-label">当前用户：{{userName}}</text>
+        <text class="login-link" bindtap="switchAccount">切换账号 / 注册</text>
+      </view>
       <view wx:else class="guest-info">
         <text class="user-label">游客模式：可先浏览功能说明</text>
         <text class="login-link" bindtap="goLogin">登录/注册</text>

@@ -253,6 +253,10 @@ Page({
   goLogin() {
     wx.navigateTo({ url: '/pages/login/login' });
   },
+
+  switchAccount() {
+    wx.navigateTo({ url: '/pages/login/login?switchAccount=1' });
+  },
   
   openActivity(e) {
     const activityId = e.currentTarget.dataset.id;

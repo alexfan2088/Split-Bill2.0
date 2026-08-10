@@ -17,6 +17,7 @@
 }
 
 .guest-info { display: flex; align-items: center; justify-content: space-between; width: 100%; }
+.signed-in-info { display: flex; align-items: center; justify-content: space-between; width: 100%; }
 .login-link { color: #1677c8; font-size: 27rpx; }
 .guest-guide { margin: 0 20rpx 20rpx; padding: 28rpx; background: #eef7ff; border-radius: 10rpx; color: #4d6172; font-size: 27rpx; line-height: 1.7; }
 .guest-guide-title { display: block; margin-bottom: 8rpx; color: #176b3a; font-size: 31rpx; font-weight: bold; }
@@ -122,4 +123,3 @@
   background-color: #dc3545;
   color: white;
 }
-
