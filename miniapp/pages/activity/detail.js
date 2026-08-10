@@ -348,10 +348,15 @@ Page({
         });
         allBills.push(...bills.map(bill => ({ ...bill, childActivityName: child.name })));
         const total = bills.reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
+        const memberNames = (child.members || [])
+          .map(member => typeof member === 'string' ? member : member.name)
+          .filter(Boolean);
         return {
           _id: child._id,
           name: child.name,
           type: child.type || '',
+          memberNames: memberNames.join('、') || '暂无成员',
+          dateRange: this.calculateDateRange(bills),
           total: this.formatAmount(total)
         };
       });

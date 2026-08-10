@@ -43,6 +43,8 @@
 .child-activity-item { display: flex; justify-content: space-between; align-items: center; background: #fff; border: 1rpx solid #e8e8e8; border-radius: 10rpx; padding: 22rpx; margin-top: 16rpx; }
 .child-activity-main { flex: 1; min-width: 0; }
 .child-activity-name { color: #176b3a; font-size: 30rpx; font-weight: 600; }
+.child-activity-meta, .child-activity-date { color: #666; font-size: 23rpx; line-height: 1.4; margin-top: 5rpx; word-break: break-all; }
+.child-activity-date { color: #888; }
 .child-activity-total { color: #137333; font-weight: bold; font-size: 29rpx; text-align: right; margin-left: 18rpx; }
 .child-activity-total-label { color: #666; font-size: 23rpx; font-weight: normal; }
 

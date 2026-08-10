@@ -130,6 +130,11 @@
         <view wx:for="{{childActivities}}" wx:key="_id" class="child-activity-item" bindtap="openChildActivity" data-id="{{item._id}}">
           <view class="child-activity-main">
             <view class="child-activity-name">{{item.name}}</view>
+            <view class="child-activity-meta">
+              <text wx:if="{{item.type}}">{{item.type}} ｜ </text>
+              <text>成员：{{item.memberNames}}</text>
+            </view>
+            <view class="child-activity-date">{{item.dateRange}}</view>
           </view>
           <view class="child-activity-total"><text class="child-activity-total-label">总支出</text> ¥{{item.total}}</view>
         </view>
