@@ -78,7 +78,7 @@
     <view class="form-item">
       <view class="form-item-header-inline">
         <text class="label label-inline">备注</text>
-        <button wx:if="{{!isReadOnly}}" class="btn btn-attachment" bindtap="onAddAttachment">附件</button>
+        <button wx:if="{{!isReadOnly}}" class="btn btn-attachment" bindtap="onAddAttachment">添加图片附件（可选）</button>
       </view>
       <textarea class="textarea" placeholder="可选（最多200个汉字）" value="{{remark}}" bindinput="onRemarkInput" disabled="{{isReadOnly}}" auto-height="{{true}}" maxlength="{{remarkMaxLen}}" />
       <view wx:if="{{attachmentItems.length > 0}}" class="attachment-list">

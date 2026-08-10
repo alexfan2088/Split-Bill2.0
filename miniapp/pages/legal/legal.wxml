@@ -17,9 +17,10 @@
     <view class="title">AA 记账隐私政策</view>
     <view class="date">生效日期：2026 年 8 月 10 日</view>
     <view class="section"><text class="section-title">1. 我们收集的信息</text><text>在你主动注册、登录和使用记账功能时，我们会处理：用户名、密码验证信息、活动名称/类型/备注、参与成员姓名、账单金额/付款人/分摊信息、充值和结算信息，以及你主动上传的账单附件（如有）。</text></view>
-    <view class="section"><text class="section-title">2. 使用目的</text><text>上述信息仅用于账户登录、保存活动账目、计算分摊与结算、向活动参与者展示对应活动数据，以及保障服务安全稳定。</text></view>
-    <view class="section"><text class="section-title">3. 不收集的信息</text><text>本小程序不要求授权获取你的手机号、微信头像或昵称；不以广告营销为目的收集个人信息。</text></view>
-    <view class="section"><text class="section-title">4. 存储与共享</text><text>数据存储于微信云开发服务。活动数据仅在对应活动参与者范围内使用；除法律法规要求外，不会向无关第三方出售或共享你的个人信息。</text></view>
-    <view class="section"><text class="section-title">5. 删除</text><text>活动创建者可在活动详情中删除活动及其关联账单、充值和成员分组数据。</text></view>
+    <view class="section"><text class="section-title">2. 相册和相机权限（可选）</text><text>仅当你在新增或编辑账单时主动点击“附件”，并选择从相册或相机添加图片时，才会访问相册或相机。图片仅用于作为该账单的附件，压缩后上传至微信云开发存储并随该账单展示。你可以不添加附件，不影响创建活动、记录账单和结算等核心功能。</text></view>
+    <view class="section"><text class="section-title">3. 使用目的</text><text>上述信息仅用于账户登录、保存活动账目、计算分摊与结算、向活动参与者展示对应活动数据，以及保障服务安全稳定。</text></view>
+    <view class="section"><text class="section-title">4. 不收集的信息</text><text>本小程序不要求授权获取你的手机号、微信头像或昵称；不以广告营销为目的收集个人信息。</text></view>
+    <view class="section"><text class="section-title">5. 存储与共享</text><text>数据存储于微信云开发服务。活动数据仅在对应活动参与者范围内使用；除法律法规要求外，不会向无关第三方出售或共享你的个人信息。</text></view>
+    <view class="section"><text class="section-title">6. 删除</text><text>活动创建者可在活动详情中删除活动及其关联账单、充值、附件和成员分组数据。</text></view>
   </view>
 </view>
