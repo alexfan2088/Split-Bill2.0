@@ -51,7 +51,8 @@ Page({
     wx.showLoading({ title: '加载中...' });
     
     try {
-      const activities = await db.getActivities();
+      // 二级活动仅在所属父活动内展示，首页只显示独立活动和父活动。
+      const activities = (await db.getActivities()).filter(activity => !activity.parentId);
       const userName = db.getCurrentUser();
       const dbCloud = wx.cloud.database();
       
