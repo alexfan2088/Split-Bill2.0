@@ -61,7 +61,12 @@ Page({
     await this.loadCommonTypes();
     
     if (options.parentId) {
-      this.setData({ parentId: options.parentId, parentName: options.parentName || '' });
+      let parentName = options.parentName || '';
+      try {
+        parentName = decodeURIComponent(parentName);
+      } catch (e) {}
+      this.setData({ parentId: options.parentId, parentName });
+      await this.loadParentName(options.parentId, parentName);
     }
 
     if (options.id && options.data) {
@@ -113,6 +118,9 @@ Page({
           isParent,
           parentId: activity.parentId || '',
         });
+        if (activity.parentId) {
+          await this.loadParentName(activity.parentId);
+        }
         this.setMembersFromNames(memberNames);
         wx.setNavigationBarTitle({
           title: '编辑活动'
@@ -146,6 +154,18 @@ Page({
   
   onNameInput(e) {
     this.setData({ name: e.detail.value });
+  },
+
+  async loadParentName(parentId, fallbackName = '') {
+    if (!parentId) return;
+    try {
+      const res = await wx.cloud.database().collection('activities').doc(parentId).get();
+      const parentName = (res.data && res.data.name) || fallbackName;
+      this.setData({ parentName });
+    } catch (e) {
+      console.error('加载父活动名称失败:', e);
+      if (fallbackName) this.setData({ parentName: fallbackName });
+    }
   },
 
   toggleParent(e) {
