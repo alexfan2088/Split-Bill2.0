@@ -42,17 +42,17 @@
         <text class="status-text {{statusTextColor}}">{{statusText}}</text>
       </view>
 
-      <view class="agreement-row">
-        <checkbox checked="{{hasAgreed}}" color="#16803c" bindchange="onAgreementChange" />
+      <checkbox-group class="agreement-row" bindchange="onAgreementChange">
+        <checkbox value="agreed" checked="{{hasAgreed}}" color="#16803c" />
         <view class="agreement-text">
           <text>我已阅读并同意</text>
           <text class="agreement-link" data-type="terms" bindtap="openLegal">《用户服务协议》</text>
           <text>和</text>
           <text class="agreement-link" data-type="privacy" bindtap="openLegal">《隐私政策》</text>
         </view>
-      </view>
+      </checkbox-group>
       
-      <button class="btn btn-full" bindtap="handleLoginOrRegister">{{isRegisterMode ? '注册' : '登录'}}</button>
+      <button class="btn btn-full" bindtap="handleLoginOrRegister" disabled="{{!hasAgreed}}">{{isRegisterMode ? '注册' : '登录'}}</button>
       
       <view class="form-item" style="margin-top: 20rpx; text-align: center;">
         <text class="link-text" bindtap="{{isRegisterMode ? 'switchToLogin' : 'switchToRegister'}}">
