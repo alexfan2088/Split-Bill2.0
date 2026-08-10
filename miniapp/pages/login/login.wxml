@@ -52,7 +52,7 @@
         </view>
       </view>
       
-      <button class="btn btn-full" bindtap="handleLoginOrRegister" disabled="{{!hasAgreed}}">{{isRegisterMode ? '注册' : '登录'}}</button>
+      <button class="btn btn-full" bindtap="handleLoginOrRegister">{{isRegisterMode ? '注册' : '登录'}}</button>
       
       <view class="form-item" style="margin-top: 20rpx; text-align: center;">
         <text class="link-text" bindtap="{{isRegisterMode ? 'switchToLogin' : 'switchToRegister'}}">

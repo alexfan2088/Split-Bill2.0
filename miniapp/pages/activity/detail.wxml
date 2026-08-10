@@ -130,10 +130,8 @@
         <view wx:for="{{childActivities}}" wx:key="_id" class="child-activity-item" bindtap="openChildActivity" data-id="{{item._id}}">
           <view class="child-activity-main">
             <view class="child-activity-name">{{item.name}}</view>
-            <view class="child-activity-meta">{{item.type}} | 成员：{{item.memberNamesText}}</view>
-            <view class="child-activity-settlement">结算：{{item.settlementText}}</view>
           </view>
-          <view class="child-activity-total">¥{{item.total}}<text class="child-activity-count">{{item.billCount}} 条</text></view>
+          <view class="child-activity-total"><text class="child-activity-total-label">总支出</text> ¥{{item.total}}</view>
         </view>
       </view>
       <!-- 预存活动的特殊显示 -->

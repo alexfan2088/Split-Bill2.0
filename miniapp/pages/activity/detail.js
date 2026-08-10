@@ -352,10 +352,7 @@ Page({
           _id: child._id,
           name: child.name,
           type: child.type || '',
-          total: this.formatAmount(total),
-          billCount: bills.length,
-          memberNamesText: (child.members || []).map(m => typeof m === 'string' ? m : m.name).filter(Boolean).join('、') || '暂无成员',
-          settlementText: Object.keys(childBalances).map(name => `${name}：¥${this.formatAmount(childBalances[name].balance)}`).join('  ')
+          total: this.formatAmount(total)
         };
       });
       const total = allBills.reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
