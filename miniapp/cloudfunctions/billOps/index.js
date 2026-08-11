@@ -7,6 +7,7 @@ cloud.init({
 
 const db = cloud.database();
 const { deleteUnreferencedAttachments, normalizeAttachmentFileIDs } = require('./attachmentCleanupCore');
+const ATTACHMENT_MANAGERS = new Set(['樊万鹏', '樊骏雅']);
 
 // 密码哈希函数（与客户端保持一致）
 function hashPassword(password) {
@@ -81,6 +82,25 @@ exports.main = async (event) => {
   const { action } = event || {};
 
   try {
+    if (action === 'createBill') {
+      const { userName, passwordHash, password, billData } = event;
+      const auth = await verifyUser(userName, passwordHash, password);
+      if (!auth.ok) return { success: false, error: auth.error };
+      if (!billData) return { success: false, error: '缺少账单数据' };
+      if (!ATTACHMENT_MANAGERS.has(userName) && normalizeAttachmentFileIDs(billData.attachments).length) {
+        return { success: false, error: '仅樊万鹏和樊骏雅可以添加附件' };
+      }
+      const result = await db.collection('bills').add({
+        data: {
+          ...billData,
+          attachments: normalizeAttachmentFileIDs(billData.attachments),
+          creator: userName,
+          createdAt: new Date()
+        }
+      });
+      return { success: true, billId: result._id };
+    }
+
     if (action === 'deleteBill') {
       const { billId, userName, passwordHash, password } = event;
       const auth = await verifyUser(userName, passwordHash, password);
@@ -146,6 +166,12 @@ exports.main = async (event) => {
       }
 
       const previousAttachmentIDs = normalizeAttachmentFileIDs(currentBill.attachments);
+      const requestedAttachmentIDs = normalizeAttachmentFileIDs(billData.attachments);
+      const attachmentsChanged = previousAttachmentIDs.length !== requestedAttachmentIDs.length
+        || previousAttachmentIDs.some(fileID => !requestedAttachmentIDs.includes(fileID));
+      if (!ATTACHMENT_MANAGERS.has(userName) && attachmentsChanged) {
+        return { success: false, error: '仅樊万鹏和樊骏雅可以修改附件' };
+      }
 
       const needCreateRecharge = !!(flags && flags.needCreateRecharge);
       const originalPayer = flags ? flags.originalPayer : null;

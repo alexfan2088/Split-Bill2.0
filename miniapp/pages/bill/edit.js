@@ -2,6 +2,7 @@
 const db = require('../../utils/db.js');
 const { computeAmountFromInput } = require('../../utils/amountExpression.js');
 const app = getApp();
+const ATTACHMENT_MANAGERS = ['樊万鹏', '樊骏雅'];
 
 Page({
   data: {
@@ -20,6 +21,7 @@ Page({
     participants: [],
     remark: '',
     attachmentItems: [],
+    canManageAttachments: false,
     isAddingAttachment: false,
     remarkMaxLen: 200,
     attachmentCanvasWidth: 10,
@@ -59,7 +61,10 @@ Page({
       return;
     }
     
-    this.setData({ activityId: options.activityId || '' });
+    this.setData({
+      activityId: options.activityId || '',
+      canManageAttachments: ATTACHMENT_MANAGERS.includes(userName)
+    });
     
     // 加载常用账单类型列表（从数据库）
     await this.loadCommonTypes();
@@ -773,7 +778,7 @@ Page({
   },
 
   async onAddAttachment() {
-    if (this.data.isReadOnly || this.data.isAddingAttachment) return;
+    if (this.data.isReadOnly || !this.data.canManageAttachments || this.data.isAddingAttachment) return;
     const maxCount = 1;
     const currentCount = (this.data.attachmentItems || []).length;
     if (currentCount >= maxCount) {
@@ -819,7 +824,7 @@ Page({
   },
 
   onRemoveAttachment(e) {
-    if (this.data.isReadOnly) return;
+    if (this.data.isReadOnly || !this.data.canManageAttachments) return;
     const index = Number(e.currentTarget.dataset.index || 0);
     const items = (this.data.attachmentItems || []).slice();
     if (index < 0 || index >= items.length) return;
@@ -1012,6 +1017,7 @@ Page({
   },
 
   async uploadNewAttachments() {
+    if (!this.data.canManageAttachments) return this.data.attachmentItems || [];
     const items = this.data.attachmentItems || [];
     const toUpload = items.filter(i => !i.fileID && i.localPath);
     if (!toUpload.length) return items;
@@ -1355,17 +1361,24 @@ Page({
         }
       } else {
         // 创建账单
-        const billResult = await dbCloud.collection('bills').add({
+        const createRes = await wx.cloud.callFunction({
+          name: 'billOps',
           data: {
-            ...billData,
-            payer: payer, // 使用修改后的付款人（如果是预存模式且付款人不是保管人，已修改为保管人）
-            creator: userName,
-            createdAt: new Date(),
-            isPayerAutoModified: needCreateRecharge || false, // 标记付款人是否被自动修改
-            originalPayer: needCreateRecharge ? originalPayer : null, // 保存原始付款人（如果被自动修改）
-            billshow: billshow || null, // 用于显示的付款人（预存模式下，如果付款人被修改为保管人，保存原始付款人）
+            action: 'createBill',
+            userName,
+            passwordHash: db.getCurrentUserPasswordHash(),
+            billData: {
+              ...billData,
+              payer,
+              isPayerAutoModified: needCreateRecharge || false,
+              originalPayer: needCreateRecharge ? originalPayer : null,
+              billshow: billshow || null
+            }
           }
         });
+        const createResult = createRes && createRes.result ? createRes.result : {};
+        if (!createResult.success) throw new Error(createResult.error || '创建账单失败');
+        const billResult = { _id: createResult.billId };
         
         // 如果是预存模式且付款人不是保管人，创建充值记录
         let relatedRechargeId = null;

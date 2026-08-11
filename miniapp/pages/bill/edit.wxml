@@ -78,13 +78,13 @@
     <view class="form-item">
       <view class="form-item-header-inline">
         <text class="label label-inline">备注</text>
-        <button wx:if="{{!isReadOnly}}" class="btn btn-attachment" bindtap="onAddAttachment" disabled="{{isAddingAttachment}}" loading="{{isAddingAttachment}}">添加图片附件（可选）</button>
+        <button wx:if="{{!isReadOnly && canManageAttachments}}" class="btn btn-attachment" bindtap="onAddAttachment" disabled="{{isAddingAttachment}}" loading="{{isAddingAttachment}}">添加图片附件（可选）</button>
       </view>
       <textarea class="textarea" placeholder="可选（最多200个汉字）" value="{{remark}}" bindinput="onRemarkInput" disabled="{{isReadOnly}}" auto-height="{{true}}" maxlength="{{remarkMaxLen}}" />
       <view wx:if="{{attachmentItems.length > 0}}" class="attachment-list">
         <view wx:for="{{attachmentItems}}" wx:key="index" class="attachment-item">
           <image class="attachment-thumb" mode="aspectFill" src="{{item.previewUrl}}" data-index="{{index}}" bindtap="onPreviewAttachment" />
-          <view wx:if="{{!isReadOnly}}" class="attachment-remove" data-index="{{index}}" bindtap="onRemoveAttachment">删除</view>
+          <view wx:if="{{!isReadOnly && canManageAttachments}}" class="attachment-remove" data-index="{{index}}" bindtap="onRemoveAttachment">删除</view>
         </view>
       </view>
     </view>
