@@ -6,6 +6,7 @@ cloud.init({
 });
 
 const db = cloud.database();
+const { deleteUnreferencedAttachments, normalizeAttachmentFileIDs } = require('./attachmentCleanupCore');
 
 // 密码哈希函数（与客户端保持一致）
 function hashPassword(password) {
@@ -110,7 +111,8 @@ exports.main = async (event) => {
       }
 
       await db.collection('bills').doc(billId).remove();
-      return { success: true };
+      const attachmentCleanup = await deleteUnreferencedAttachments(db, cloud, bill.attachments);
+      return { success: true, attachmentCleanup };
     }
 
     if (action === 'updateBill') {
@@ -142,6 +144,8 @@ exports.main = async (event) => {
       if (currentBill.creator !== userName) {
         return { success: false, error: '只有创建者可以更新' };
       }
+
+      const previousAttachmentIDs = normalizeAttachmentFileIDs(currentBill.attachments);
 
       const needCreateRecharge = !!(flags && flags.needCreateRecharge);
       const originalPayer = flags ? flags.originalPayer : null;
@@ -178,6 +182,9 @@ exports.main = async (event) => {
       };
 
       await db.collection('bills').doc(billId).set({ data: cleanBillData });
+      const nextAttachmentIDs = new Set(normalizeAttachmentFileIDs(cleanBillData.attachments));
+      const removedAttachments = previousAttachmentIDs.filter(fileID => !nextAttachmentIDs.has(fileID));
+      const attachmentCleanup = await deleteUnreferencedAttachments(db, cloud, removedAttachments);
 
       let rechargeMessage = '';
       let rechargeAction = 'none';
@@ -258,7 +265,8 @@ exports.main = async (event) => {
         success: true,
         rechargeAction,
         rechargeMessage,
-        relatedRechargeId
+        relatedRechargeId,
+        attachmentCleanup
       };
     }
 

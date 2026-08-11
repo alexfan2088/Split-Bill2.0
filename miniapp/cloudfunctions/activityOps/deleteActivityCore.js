@@ -20,7 +20,7 @@ async function fetchAll(collection, query, limit = DEFAULT_LIMIT) {
   return all;
 }
 
-async function deleteManyByActivityId(db, collectionName, activityId) {
+async function deleteManyByActivityId(db, collectionName, activityId, onRecordsDeleted) {
   const records = await fetchAll(db.collection(collectionName), { activityId });
   if (records.length === 0) {
     return 0;
@@ -30,11 +30,13 @@ async function deleteManyByActivityId(db, collectionName, activityId) {
     db.collection(collectionName).doc(record._id).remove()
   )));
 
+  if (onRecordsDeleted) await onRecordsDeleted(records);
+
   return records.length;
 }
 
-async function deleteActivityRecords(db, activityId) {
-  const deletedBills = await deleteManyByActivityId(db, 'bills', activityId);
+async function deleteActivityRecords(db, activityId, onBillsDeleted) {
+  const deletedBills = await deleteManyByActivityId(db, 'bills', activityId, onBillsDeleted);
   const deletedRecharges = await deleteManyByActivityId(db, 'recharges', activityId);
   const deletedGroups = await deleteManyByActivityId(db, 'groups', activityId);
 

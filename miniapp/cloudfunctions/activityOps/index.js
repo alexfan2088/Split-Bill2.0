@@ -7,6 +7,7 @@ cloud.init({
 
 const db = cloud.database();
 const { deleteActivityRecords } = require('./deleteActivityCore');
+const { deleteUnreferencedActivityAttachments } = require('./attachmentCleanupCore');
 const { getActivityDetail } = require('./getActivityDetailCore');
 const { getParentActivityDetail, refreshParentMembers } = require('./parentActivityCore');
 
@@ -505,9 +506,15 @@ exports.main = async (event) => {
 
       if (activity.isParent) {
         const children = await fetchAll(db, 'activities', { parentId: activityId });
-        for (const child of children) await deleteActivityRecords(db, child._id);
+        for (const child of children) {
+          await deleteActivityRecords(db, child._id, (bills) => (
+            deleteUnreferencedActivityAttachments(db, cloud, bills)
+          ));
+        }
       }
-      await deleteActivityRecords(db, activityId);
+      await deleteActivityRecords(db, activityId, (bills) => (
+        deleteUnreferencedActivityAttachments(db, cloud, bills)
+      ));
 
       if (activity.parentId) await refreshParentMembers(db, activity.parentId);
 
