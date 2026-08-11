@@ -20,6 +20,7 @@ Page({
     participants: [],
     remark: '',
     attachmentItems: [],
+    isAddingAttachment: false,
     remarkMaxLen: 200,
     attachmentCanvasWidth: 10,
     attachmentCanvasHeight: 10,
@@ -771,27 +772,41 @@ Page({
     this.setData({ remark: e.detail.value });
   },
 
-  onAddAttachment() {
-    if (this.data.isReadOnly) return;
+  async onAddAttachment() {
+    if (this.data.isReadOnly || this.data.isAddingAttachment) return;
     const maxCount = 1;
     const currentCount = (this.data.attachmentItems || []).length;
     if (currentCount >= maxCount) {
       wx.showToast({ title: '最多添加1张图片', icon: 'none' });
       return;
     }
-    wx.chooseImage({
-      count: maxCount - currentCount,
-      sizeType: ['compressed'],
-      sourceType: ['album', 'camera'],
-      success: async (res) => {
-        const tempFiles = res && res.tempFiles ? res.tempFiles : [];
-        if (!tempFiles.length) return;
-        const newItems = await this.processSelectedImages(tempFiles);
-        if (!newItems.length) return;
-        const merged = (this.data.attachmentItems || []).concat(newItems).slice(0, maxCount);
-        this.setData({ attachmentItems: merged });
+
+    this.setData({ isAddingAttachment: true });
+    try {
+      const res = await new Promise((resolve, reject) => {
+        wx.chooseImage({
+          count: maxCount - currentCount,
+          sizeType: ['compressed'],
+          sourceType: ['album', 'camera'],
+          success: resolve,
+          fail: reject
+        });
+      });
+      const tempFiles = res && res.tempFiles ? res.tempFiles : [];
+      if (!tempFiles.length) return;
+      const newItems = await this.processSelectedImages(tempFiles);
+      if (!newItems.length) return;
+      const merged = (this.data.attachmentItems || []).concat(newItems).slice(0, maxCount);
+      this.setData({ attachmentItems: merged });
+    } catch (e) {
+      // 用户取消选择不需要提示；其他错误才反馈。
+      if (e && e.errMsg && !e.errMsg.includes('cancel')) {
+        console.error('选择附件图片失败:', e);
+        wx.showToast({ title: '图片添加失败，请重试', icon: 'none' });
       }
-    });
+    } finally {
+      this.setData({ isAddingAttachment: false });
+    }
   },
 
   onPreviewAttachment(e) {
@@ -883,11 +898,22 @@ Page({
     };
 
     const canvasToFile = async (p, width, height, quality) => {
-      this.setData({
-        attachmentCanvasWidth: width,
-        attachmentCanvasHeight: height
+      // setData 是异步的；若尚未完成布局就绘制，部分机型会以旧的 10×10
+      // 画布导出，从而产生预览空白的临时图片。
+      await new Promise((resolve) => {
+        this.setData({
+          attachmentCanvasWidth: width,
+          attachmentCanvasHeight: height
+        }, () => {
+          if (typeof wx.nextTick === 'function') {
+            wx.nextTick(resolve);
+          } else {
+            resolve();
+          }
+        });
       });
       const ctx = wx.createCanvasContext('attachmentCanvas', this);
+      ctx.clearRect(0, 0, width, height);
       ctx.drawImage(p, 0, 0, width, height);
       await new Promise((resolve) => ctx.draw(false, resolve));
       return await new Promise((resolve, reject) => {
