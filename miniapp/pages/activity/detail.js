@@ -2048,10 +2048,10 @@ Page({
       return sum + this.getFamilyExpense(item.activity || {}, billTotal);
     }, 0);
 
-    addText('父活动信息', { title: true });
-    addText(`父活动名称：${parent.name || '未命名父活动'}`);
+    addText('一级活动信息', { title: true });
+    addText(`一级活动名称：${parent.name || '未命名一级活动'}`);
     addText(`创建者：${parent.creator || '未设置'}`);
-    addText('活动属性：父活动');
+    addText('活动属性：一级活动');
     addText(`总支出：¥${this.formatAmount(total)}`);
     addText(`起止日期：${parentDateRange || '至今'}`);
     addText(`包含二级活动：${children.length} 个`);
@@ -2071,10 +2071,12 @@ Page({
           .join('、');
         const billTotal = (item.bills || []).reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
         const childTotal = this.getFamilyExpense(child, billTotal);
+        const childDateRange = this.calculateDateRange(item.bills || []);
         addText(`${index + 1}. 二级活动名称：${child.name || '未命名活动'}`);
         addText(`   创建者：${child.creator || '未设置'}`);
         addText(`   参与成员：${members || '无'}`);
         addText(`   家庭支出：¥${this.formatAmount(childTotal)}`);
+        addText(`   起止时间：${childDateRange || '至今'}`);
         addBlank();
       });
     }
@@ -2115,15 +2117,25 @@ Page({
         dateRange: this.calculateDateRange(bills),
         familyExpense: this.getFamilyExpense(child, childTotal)
       });
-      // 每份子活动内容之前增加清晰分隔，之后完整复用原子活动 PDF 内容。
-      pages.push([{
+      // 标题直接写入子活动首页，避免单独生成只有标题的空白页。
+      let carryLine = {
         type: 'text',
         text: `二级活动 ${index + 1}/${children.length}：${child.name || '未命名活动'}`,
         fontSize: 26,
         color: '#1d4ed8',
         bold: true,
         role: 'title'
-      }]);
+      };
+      childPages.pages.forEach((page) => {
+        if (!carryLine || !Array.isArray(page)) return;
+        page.unshift(carryLine);
+        if (page.length <= maxLines) {
+          carryLine = null;
+        } else {
+          carryLine = page.pop();
+        }
+      });
+      if (carryLine) childPages.pages.push([carryLine]);
       pages.push(...childPages.pages);
     });
 
