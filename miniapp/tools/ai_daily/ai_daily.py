@@ -338,7 +338,7 @@ def translate_to_chinese(text: str) -> str:
     chunks: list[str] = []
     current = ""
     for sentence in re.split(r"(?<=[.!?])\s+", text):
-        if len(current) + len(sentence) + 1 > 800 and current:
+        if len(current) + len(sentence) + 1 > 450 and current:
             chunks.append(current)
             current = sentence
         else:
@@ -347,7 +347,7 @@ def translate_to_chinese(text: str) -> str:
         chunks.append(current)
     translated_chunks = []
     for chunk in chunks:
-        query = urllib.parse.urlencode(
+        google_query = urllib.parse.urlencode(
             {
                 "client": "gtx",
                 "sl": "auto",
@@ -356,13 +356,14 @@ def translate_to_chinese(text: str) -> str:
                 "q": chunk,
             }
         )
+        memory_query = urllib.parse.urlencode({"q": chunk, "langpair": "en|zh-CN"})
         translated = ""
         last_error: Exception | None = None
-        # 备用域名和重试：公共接口偶发限流时不能把英文原文误作为中文译文发送。
+        # 主服务使用 Google；域名切换可避开偶发限流。
         for host in ("translate.googleapis.com", "translate.google.com"):
             for attempt in range(2):
                 try:
-                    data = json.loads(fetch_url(f"https://{host}/translate_a/single?{query}", timeout=15).decode("utf-8"))
+                    data = json.loads(fetch_url(f"https://{host}/translate_a/single?{google_query}", timeout=15).decode("utf-8"))
                     candidate = "".join(part[0] for part in data[0] if part and part[0]).strip()
                     if candidate and has_chinese(candidate):
                         translated = candidate
@@ -374,9 +375,24 @@ def translate_to_chinese(text: str) -> str:
                         time.sleep(1)
             if translated:
                 break
+        # 独立的 MyMemory 翻译服务作为第二供应商，避免单一服务异常导致日报无法产出。
         if not translated:
-            log(f"Translation failed; omitting untranslated chunk: {last_error}")
-            return ""
+            for attempt in range(2):
+                try:
+                    data = json.loads(fetch_url(f"https://api.mymemory.translated.net/get?{memory_query}", timeout=20).decode("utf-8"))
+                    candidate = clean_text((data.get("responseData") or {}).get("translatedText", ""))
+                    if candidate and has_chinese(candidate):
+                        translated = candidate
+                        break
+                    raise RuntimeError("MyMemory response contains no Chinese text")
+                except Exception as exc:
+                    last_error = exc
+                    if attempt == 0:
+                        time.sleep(1)
+        if not translated:
+            raise RuntimeError(
+                f"英文内容未能翻译成中文，已终止本期日报生成，避免发送非中文内容：{last_error}"
+            )
         translated_chunks.append(translated)
     return re.sub(r"\s+", " ", "".join(translated_chunks)).strip()
 
@@ -747,6 +763,13 @@ def get_translated_extraction(item: dict) -> str:
     return item["_translated_extraction"]
 
 
+def get_translated_title(item: dict) -> str:
+    if "_translated_title" not in item:
+        title = clean_text(item.get("title", ""))
+        item["_translated_title"] = translate_to_chinese(title)
+    return item["_translated_title"]
+
+
 def split_sentences(text: str) -> list[str]:
     candidates = re.split(r"(?<=[。！？；.!?;])\s*", text)
     return [sentence.strip() for sentence in candidates if len(sentence.strip()) >= 18]
@@ -931,7 +954,7 @@ def build_body_with_styles(items: list[dict], glossary_terms: list[dict] | None 
 
     for idx, item in enumerate(items, 1):
         append_segments(parts, styles, [("", None)])
-        append_segments(parts, styles, [(f"{idx}. {item['title']}", None)])
+        append_segments(parts, styles, [(f"{idx}. {get_translated_title(item)}", None)])
         append_segments(parts, styles, [("推荐指数：", BLUE_BOLD), (stars(item, idx - 1), None)])
         append_segments(parts, styles, [("中文详细解读：", BLUE_BOLD)])
         append_segments(parts, styles, [(article_detail(item), None)])
