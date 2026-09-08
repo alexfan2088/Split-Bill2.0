@@ -29,7 +29,7 @@ STATE_PATH = DATA_DIR / "sent_urls.json"
 GLOSSARY_STATE_PATH = DATA_DIR / "glossary_state.json"
 SMTP_CONFIG_PATH = DATA_DIR / "smtp.json"
 ITEM_LIMIT = 3
-MAX_IMAGES_PER_ARTICLE = 5
+MAX_IMAGES_PER_ARTICLE = 3
 RECIPIENTS = [
     "hruicn@gmail.com",
     "rocket.tang@163.com",
@@ -348,7 +348,7 @@ def extract_article_images(page: str, article_url: str) -> list[str]:
             lower = image_url.lower()
             if not image_url.startswith("https://") or lower.startswith("data:"):
                 continue
-            if any(part in lower for part in ["logo", "icon", "avatar", "advert", "tracking", "pixel"]):
+            if any(part in lower for part in ["logo", "icon", "avatar", "advert", "tracking", "pixel", "-268x", "thumbnail"]):
                 continue
             if image_url not in candidates:
                 candidates.append(image_url)
@@ -1170,7 +1170,7 @@ def collect_inline_images(items: list[dict]) -> list[dict]:
                 continue
             seen.add(image_url)
             try:
-                data = fetch_url(image_url, timeout=20)
+                data = fetch_url(image_url, timeout=8)
                 if not data or len(data) > 8 * 1024 * 1024:
                     raise RuntimeError("image is empty or exceeds 8 MB")
                 subtype = mimetypes.guess_type(image_url)[0] or "image/jpeg"
