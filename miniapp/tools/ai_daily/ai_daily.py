@@ -7,8 +7,8 @@ import argparse
 import datetime as dt
 import email.utils
 import html
+import io
 import json
-import mimetypes
 import os
 import re
 import smtplib
@@ -21,10 +21,26 @@ import xml.etree.ElementTree as ET
 from email.message import EmailMessage
 from pathlib import Path
 
+try:
+    from reportlab.lib.enums import TA_CENTER
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import mm
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+    from reportlab.platypus import Image as PdfImage
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+    from PIL import Image as PilImage
+except ImportError as exc:
+    raise RuntimeError(
+        "缺少 PDF 依赖 reportlab。请运行：python3 -m pip install -r tools/ai_daily/requirements.txt"
+    ) from exc
+
 
 ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = Path.home() / ".codex" / "ai_daily"
 OUT_DIR = DATA_DIR / "out"
+PDF_OUT_DIR = OUT_DIR / "pdf"
 STATE_PATH = DATA_DIR / "sent_urls.json"
 GLOSSARY_STATE_PATH = DATA_DIR / "glossary_state.json"
 SMTP_CONFIG_PATH = DATA_DIR / "smtp.json"
@@ -315,24 +331,57 @@ def extract_article_text(url: str, fallback: str) -> dict:
         page = decode_html(fetch_url(url, timeout=15))
     except Exception as exc:
         log(f"Article fetch failed: {url}: {exc}")
-        return {"text": fallback, "kind": "summary", "images": []}
-    image_urls = extract_article_images(page, url)
+        return {"text": fallback, "kind": "summary", "images": [], "blocks": [{"type": "text", "text": fallback}]}
     page = re.sub(r"(?is)<(script|style|noscript|svg|header|footer|nav|aside)[^>]*>.*?</\1>", " ", page)
-    paragraphs = []
-    for paragraph in re.findall(r"(?is)<p[^>]*>(.*?)</p>", page):
-        text = clean_text(paragraph)
+    blocks = extract_article_blocks(page, url)
+    paragraphs = [block["text"] for block in blocks if block["type"] == "text"]
+    image_urls = [block["url"] for block in blocks if block["type"] == "image"]
+    if not image_urls:
+        image_urls = extract_article_images(page, url)
+    article = " ".join(paragraphs).strip()
+    if len(article) >= 300:
+        return {"text": re.sub(r"\s+", " ", article).strip(), "kind": "article", "images": image_urls, "blocks": blocks}
+    description = extract_meta_description(page)
+    if len(description) >= 80:
+        return {"text": description, "kind": "summary", "images": image_urls, "blocks": [{"type": "text", "text": description}]}
+    return {"text": fallback, "kind": "summary", "images": image_urls, "blocks": [{"type": "text", "text": fallback}]}
+
+
+def extract_image_url(fragment: str, article_url: str) -> str:
+    match = re.search(r"<img[^>]+(?:src|data-src)=[\"']([^\"']+)", fragment, flags=re.I | re.S)
+    if not match:
+        return ""
+    image_url = urllib.parse.urljoin(article_url, html.unescape(match.group(1)).strip())
+    lower = image_url.lower()
+    if not image_url.startswith("https://") or lower.startswith("data:"):
+        return ""
+    if any(part in lower for part in ["logo", "icon", "avatar", "advert", "tracking", "pixel", "-268x", "thumbnail"]):
+        return ""
+    return image_url
+
+
+def extract_article_blocks(page: str, article_url: str) -> list[dict]:
+    """Return readable text and figure blocks in source order for the translated PDF."""
+    blocks: list[dict] = []
+    seen_images: set[str] = set()
+    pattern = r"(?is)<(p|figure)\b[^>]*>(.*?)</\1>"
+    for match in re.finditer(pattern, page):
+        tag, fragment = match.group(1).lower(), match.group(2)
+        if tag == "figure":
+            image_url = extract_image_url(fragment, article_url)
+            if image_url and image_url not in seen_images and len(seen_images) < MAX_IMAGES_PER_ARTICLE:
+                caption_match = re.search(r"(?is)<figcaption[^>]*>(.*?)</figcaption>", fragment)
+                caption = clean_text(caption_match.group(1)) if caption_match else ""
+                blocks.append({"type": "image", "url": image_url, "caption": caption})
+                seen_images.add(image_url)
+            continue
+        text = clean_text(fragment)
         if len(text) < 60:
             continue
         if any(skip in text.lower() for skip in ["cookie", "subscribe", "newsletter", "advertisement", "sign up"]):
             continue
-        paragraphs.append(text)
-    article = " ".join(paragraphs).strip()
-    if len(article) >= 300:
-        return {"text": re.sub(r"\s+", " ", article).strip(), "kind": "article", "images": image_urls}
-    description = extract_meta_description(page)
-    if len(description) >= 80:
-        return {"text": description, "kind": "summary", "images": image_urls}
-    return {"text": fallback, "kind": "summary", "images": image_urls}
+        blocks.append({"type": "text", "text": text})
+    return blocks
 
 
 def extract_article_images(page: str, article_url: str) -> list[str]:
@@ -693,7 +742,12 @@ def get_article_extraction(item: dict) -> dict:
     extraction = extract_article_text(item.get("url", ""), fallback)
     original_text = extraction["text"]
     if "comprehensive up-to-date news coverage" in original_text.lower() or "由 google 新闻" in original_text.lower():
-        extraction = {"text": fallback, "kind": "summary", "images": extraction.get("images", [])}
+        extraction = {
+            "text": fallback,
+            "kind": "summary",
+            "images": extraction.get("images", []),
+            "blocks": [{"type": "text", "text": fallback}],
+        }
     item["_article_extraction"] = extraction
     return extraction
 
@@ -802,8 +856,23 @@ def article_detail(item: dict) -> str:
 def get_translated_extraction(item: dict) -> str:
     if "_translated_extraction" not in item:
         extraction = get_article_extraction(item)
-        item["_translated_extraction"] = translate_to_chinese(extraction["text"])
+        translated_blocks = get_translated_blocks(item)
+        text = " ".join(block["text"] for block in translated_blocks if block["type"] == "text")
+        item["_translated_extraction"] = text or translate_to_chinese(extraction["text"])
     return item["_translated_extraction"]
+
+
+def get_translated_blocks(item: dict) -> list[dict]:
+    if "_translated_blocks" in item:
+        return item["_translated_blocks"]
+    translated: list[dict] = []
+    for block in get_article_extraction(item).get("blocks", []):
+        if block["type"] == "text":
+            translated.append({"type": "text", "text": translate_to_chinese(block["text"])})
+        else:
+            translated.append(block.copy())
+    item["_translated_blocks"] = translated
+    return translated
 
 
 def get_translated_title(item: dict) -> str:
@@ -811,6 +880,87 @@ def get_translated_title(item: dict) -> str:
         title = clean_text(item.get("title", ""))
         item["_translated_title"] = translate_to_chinese(title)
     return item["_translated_title"]
+
+
+def safe_filename(value: str, limit: int = 42) -> str:
+    value = re.sub(r"[^\w\-\u4e00-\u9fff]+", "_", value).strip("_")
+    return (value[:limit] or "article")
+
+
+def register_pdf_font() -> str:
+    # ReportLab 自带的 CID 中文字体可稳定输出简体中文，且不依赖运行机器上的字体文件。
+    font_name = "STSong-Light"
+    if font_name in pdfmetrics.getRegisteredFontNames():
+        return font_name
+    pdfmetrics.registerFont(UnicodeCIDFont(font_name))
+    return font_name
+
+
+def build_article_pdf(item: dict, index: int, report_date: str) -> Path:
+    """Create one translated-source PDF, preserving the text/figure source order."""
+    font_name = register_pdf_font()
+    PDF_OUT_DIR.mkdir(parents=True, exist_ok=True)
+    title = get_translated_title(item)
+    path = PDF_OUT_DIR / f"ai_daily_{report_date}_{index}_{safe_filename(title)}.pdf"
+    document = SimpleDocTemplate(
+        str(path), pagesize=A4, leftMargin=17 * mm, rightMargin=17 * mm, topMargin=16 * mm, bottomMargin=16 * mm,
+        title=title,
+    )
+    styles = getSampleStyleSheet()
+    heading = ParagraphStyle("AIDailyHeading", parent=styles["Heading1"], fontName=font_name, fontSize=17, leading=24, alignment=TA_CENTER, spaceAfter=12)
+    meta = ParagraphStyle("AIDailyMeta", parent=styles["BodyText"], fontName=font_name, fontSize=9, leading=14, textColor="#555555", spaceAfter=7)
+    body = ParagraphStyle("AIDailyBody", parent=styles["BodyText"], fontName=font_name, fontSize=10.5, leading=19, wordWrap="CJK", spaceAfter=8)
+    caption = ParagraphStyle("AIDailyCaption", parent=meta, fontSize=8.5, leading=12, alignment=TA_CENTER, spaceAfter=10)
+    story = [
+        Paragraph(html.escape(title), heading),
+        Paragraph("中文直译原文（图片按原文出现位置排版）", meta),
+        Paragraph(f'原文链接：<link href="{html.escape(item["url"])}">{html.escape(item["url"])}</link>', meta),
+        Spacer(1, 5),
+    ]
+    for block in get_translated_blocks(item):
+        if block["type"] == "text":
+            story.append(Paragraph(html.escape(block["text"]), body))
+            continue
+        image_url = block["url"]
+        try:
+            image_data = fetch_url(image_url, timeout=15)
+            if not image_data or len(image_data) > 12 * 1024 * 1024:
+                raise RuntimeError("图片为空或超过 12 MB")
+            # 先完整解码再转为 JPEG，避免 ReportLab 在最终绘制时才因 WebP、透明 PNG
+            # 或损坏图片中断整个 PDF 的生成。
+            source_image = PilImage.open(io.BytesIO(image_data))
+            source_image.load()
+            if source_image.mode in {"RGBA", "LA"}:
+                background = PilImage.new("RGB", source_image.size, "white")
+                background.paste(source_image.convert("RGBA"), mask=source_image.convert("RGBA").getchannel("A"))
+                source_image = background
+            elif source_image.mode != "RGB":
+                source_image = source_image.convert("RGB")
+            normalized = io.BytesIO()
+            source_image.save(normalized, format="JPEG", quality=88, optimize=True)
+            normalized.seek(0)
+            image = PdfImage(normalized)
+            image._restrictSize(document.width, 125 * mm)
+            story.extend([Spacer(1, 3), image])
+            if block.get("caption"):
+                story.append(Paragraph(html.escape(translate_to_chinese(block["caption"])), caption))
+            else:
+                story.append(Spacer(1, 8))
+        except Exception as exc:
+            log(f"PDF image download failed: {image_url}: {exc}")
+            story.append(Paragraph(f"原文图片未能下载：{html.escape(image_url)}", caption))
+    document.build(story)
+    return path
+
+
+def build_article_pdfs(items: list[dict]) -> list[Path]:
+    report_date = dt.datetime.now().strftime("%Y-%m-%d")
+    paths = []
+    for index, item in enumerate(items, 1):
+        path = build_article_pdf(item, index, report_date)
+        paths.append(path)
+        log(f"Wrote translated article PDF: {path}")
+    return paths
 
 
 def split_sentences(text: str) -> list[str]:
@@ -1005,10 +1155,7 @@ def build_body_with_styles(items: list[dict], glossary_terms: list[dict] | None 
         append_segments(parts, styles, [(chinese_summary(item, idx - 1), None)])
         append_segments(parts, styles, [("", None)])
         append_segments(parts, styles, [("中文直译：", BLUE_BOLD)])
-        append_segments(parts, styles, [(article_detail(item), None)])
-        image_urls = get_article_extraction(item).get("images", [])
-        for image_index, image_url in enumerate(image_urls, 1):
-            append_segments(parts, styles, [(f"原文图片 {image_index}：{image_url}", None)])
+        append_segments(parts, styles, [(f"请见附件 PDF《{idx}_{safe_filename(get_translated_title(item))}》；其中图片已按原文出现位置与相关段落排版。", None)])
 
     append_segments(parts, styles, [("", None)])
     append_segments(parts, styles, [("今日结论：", None)])
@@ -1161,34 +1308,7 @@ def style_to_css(style: dict) -> str:
     return "; ".join(declarations)
 
 
-def collect_inline_images(items: list[dict]) -> list[dict]:
-    inline_images: list[dict] = []
-    seen: set[str] = set()
-    for item_index, item in enumerate(items, 1):
-        for image_index, image_url in enumerate(get_article_extraction(item).get("images", []), 1):
-            if image_url in seen:
-                continue
-            seen.add(image_url)
-            try:
-                data = fetch_url(image_url, timeout=8)
-                if not data or len(data) > 8 * 1024 * 1024:
-                    raise RuntimeError("image is empty or exceeds 8 MB")
-                subtype = mimetypes.guess_type(image_url)[0] or "image/jpeg"
-                subtype = subtype.split("/", 1)[-1].replace("jpg", "jpeg")
-                if subtype not in {"jpeg", "png", "gif", "webp"}:
-                    subtype = "jpeg"
-                inline_images.append({
-                    "url": image_url,
-                    "cid": f"ai-daily-{item_index}-{image_index}@inline",
-                    "data": data,
-                    "subtype": subtype,
-                })
-            except Exception as exc:
-                log(f"Article image download failed; keeping URL only: {image_url}: {exc}")
-    return inline_images
-
-
-def body_to_html(body: str, styles: list[dict] | None = None, inline_images: list[dict] | None = None) -> str:
+def body_to_html(body: str, styles: list[dict] | None = None) -> str:
     styles = sorted(styles or [], key=lambda item: item["start"])
     pieces = []
     cursor = 0
@@ -1204,13 +1324,6 @@ def body_to_html(body: str, styles: list[dict] | None = None, inline_images: lis
     if cursor < len(body):
         pieces.append(html.escape(body[cursor:]))
     content = "".join(pieces)
-    for image in inline_images or []:
-        image_url = html.escape(image["url"])
-        image_html = (
-            f'<a href="{image_url}"><img src="cid:{image["cid"]}" '
-            'style="display:block;max-width:100%;height:auto;margin:10px 0" /></a>'
-        )
-        content = content.replace(image_url, image_html)
     return (
         '<!doctype html><html><body>'
         '<div style="font-family: -apple-system, BlinkMacSystemFont, '
@@ -1267,7 +1380,7 @@ def send_via_mail(body_path: Path, recipients: list[str], styles: list[dict] | N
         raise RuntimeError("Some Mail sends failed: " + " | ".join(failures))
 
 
-def send_via_smtp(body_path: Path, recipients: list[str], styles: list[dict] | None = None, inline_images: list[dict] | None = None) -> None:
+def send_via_smtp(body_path: Path, recipients: list[str], styles: list[dict] | None = None, pdf_paths: list[Path] | None = None) -> None:
     config = load_smtp_config()
     missing = [key for key in ["host", "port", "user", "from", "password"] if not config.get(key)]
     if missing:
@@ -1278,7 +1391,7 @@ def send_via_smtp(body_path: Path, recipients: list[str], styles: list[dict] | N
         )
 
     body = body_path.read_text("utf-8")
-    html_body = body_to_html(body, styles, inline_images)
+    html_body = body_to_html(body, styles)
     failures = []
     for recipient in recipients:
         log(f"Sending SMTP message to {recipient}")
@@ -1288,14 +1401,8 @@ def send_via_smtp(body_path: Path, recipients: list[str], styles: list[dict] | N
         message["Subject"] = SUBJECT
         message.set_content(body)
         message.add_alternative(html_body, subtype="html")
-        html_part = message.get_payload()[-1]
-        for image in inline_images or []:
-            html_part.add_related(
-                image["data"],
-                maintype="image",
-                subtype=image["subtype"],
-                cid=f"<{image['cid']}>",
-            )
+        for pdf_path in pdf_paths or []:
+            message.add_attachment(pdf_path.read_bytes(), maintype="application", subtype="pdf", filename=pdf_path.name)
         try:
             with smtplib.SMTP(config["host"], int(config["port"]), timeout=60) as smtp:
                 smtp.ehlo()
@@ -1397,23 +1504,19 @@ def main() -> int:
     body, styles = build_body_with_styles(selected, glossary_terms)
     body_path = write_body(body)
     log(f"Wrote {body_path}")
-    inline_images = collect_inline_images(selected)
+    pdf_paths = build_article_pdfs(selected)
 
     if args.send:
         recipients = TEST_RECIPIENTS if args.test else RECIPIENTS
         if args.mail:
-            log(f"Sending through macOS Mail to {', '.join(recipients)}")
-            send_via_mail(body_path, recipients, styles)
+            raise RuntimeError("PDF 附件仅支持 SMTP 发送；请移除 --mail 并配置 SMTP。")
         elif args.gmail_web:
-            log(f"Sending through Gmail web to {', '.join(recipients)}")
-            send_via_gmail(body_path, recipients)
+            raise RuntimeError("PDF 附件仅支持 SMTP 发送；请移除 --gmail-web 并配置 SMTP。")
         elif args.smtp or smtp_is_configured():
             log(f"Sending through SMTP to {', '.join(recipients)}")
-            send_via_smtp(body_path, recipients, styles, inline_images)
+            send_via_smtp(body_path, recipients, styles, pdf_paths)
         else:
-            log("SMTP is not configured; falling back to Gmail web")
-            log(f"Sending through Gmail web to {', '.join(recipients)}")
-            send_via_gmail(body_path, recipients)
+            raise RuntimeError("PDF 附件需要 SMTP。请配置 SMTP 后使用 --send --smtp。")
         if args.test:
             log("Test send completed; sent URL state was not updated")
         else:
