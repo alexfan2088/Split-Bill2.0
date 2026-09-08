@@ -8,6 +8,7 @@ import datetime as dt
 import email.utils
 import html
 import json
+import mimetypes
 import os
 import re
 import smtplib
@@ -27,7 +28,8 @@ OUT_DIR = DATA_DIR / "out"
 STATE_PATH = DATA_DIR / "sent_urls.json"
 GLOSSARY_STATE_PATH = DATA_DIR / "glossary_state.json"
 SMTP_CONFIG_PATH = DATA_DIR / "smtp.json"
-ITEM_LIMIT = 5
+ITEM_LIMIT = 3
+MAX_IMAGES_PER_ARTICLE = 5
 RECIPIENTS = [
     "hruicn@gmail.com",
     "rocket.tang@163.com",
@@ -313,7 +315,8 @@ def extract_article_text(url: str, fallback: str) -> dict:
         page = decode_html(fetch_url(url, timeout=15))
     except Exception as exc:
         log(f"Article fetch failed: {url}: {exc}")
-        return {"text": fallback, "kind": "summary"}
+        return {"text": fallback, "kind": "summary", "images": []}
+    image_urls = extract_article_images(page, url)
     page = re.sub(r"(?is)<(script|style|noscript|svg|header|footer|nav|aside)[^>]*>.*?</\1>", " ", page)
     paragraphs = []
     for paragraph in re.findall(r"(?is)<p[^>]*>(.*?)</p>", page):
@@ -325,11 +328,33 @@ def extract_article_text(url: str, fallback: str) -> dict:
         paragraphs.append(text)
     article = " ".join(paragraphs).strip()
     if len(article) >= 300:
-        return {"text": re.sub(r"\s+", " ", article).strip(), "kind": "article"}
+        return {"text": re.sub(r"\s+", " ", article).strip(), "kind": "article", "images": image_urls}
     description = extract_meta_description(page)
     if len(description) >= 80:
-        return {"text": description, "kind": "summary"}
-    return {"text": fallback, "kind": "summary"}
+        return {"text": description, "kind": "summary", "images": image_urls}
+    return {"text": fallback, "kind": "summary", "images": image_urls}
+
+
+def extract_article_images(page: str, article_url: str) -> list[str]:
+    candidates: list[str] = []
+    patterns = [
+        r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)',
+        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image',
+        r'<img[^>]+(?:src|data-src)=["\']([^"\']+)',
+    ]
+    for pattern in patterns:
+        for value in re.findall(pattern, page, flags=re.I | re.S):
+            image_url = urllib.parse.urljoin(article_url, html.unescape(value).strip())
+            lower = image_url.lower()
+            if not image_url.startswith("https://") or lower.startswith("data:"):
+                continue
+            if any(part in lower for part in ["logo", "icon", "avatar", "advert", "tracking", "pixel"]):
+                continue
+            if image_url not in candidates:
+                candidates.append(image_url)
+            if len(candidates) >= MAX_IMAGES_PER_ARTICLE:
+                return candidates
+    return candidates
 
 
 def translate_to_chinese(text: str) -> str:
@@ -668,7 +693,7 @@ def get_article_extraction(item: dict) -> dict:
     extraction = extract_article_text(item.get("url", ""), fallback)
     original_text = extraction["text"]
     if "comprehensive up-to-date news coverage" in original_text.lower() or "由 google 新闻" in original_text.lower():
-        extraction = {"text": fallback, "kind": "summary"}
+        extraction = {"text": fallback, "kind": "summary", "images": extraction.get("images", [])}
     item["_article_extraction"] = extraction
     return extraction
 
@@ -973,13 +998,17 @@ def build_body_with_styles(items: list[dict], glossary_terms: list[dict] | None 
     for idx, item in enumerate(items, 1):
         append_segments(parts, styles, [("", None)])
         append_segments(parts, styles, [(f"{idx}. {get_translated_title(item)}", None)])
-        append_segments(parts, styles, [("推荐指数：", BLUE_BOLD), (stars(item, idx - 1), None)])
-        append_segments(parts, styles, [("中文详细解读：", BLUE_BOLD)])
-        append_segments(parts, styles, [(article_detail(item), None)])
-        append_segments(parts, styles, [("", None)])
-        append_segments(parts, styles, [(chinese_summary(item, idx - 1), None)])
         append_segments(parts, styles, [("链接：", BLUE_BOLD)])
         append_segments(parts, styles, [(item["url"], None)])
+        append_segments(parts, styles, [("推荐指数：", BLUE_BOLD), (stars(item, idx - 1), None)])
+        append_segments(parts, styles, [("总结解读：", BLUE_BOLD)])
+        append_segments(parts, styles, [(chinese_summary(item, idx - 1), None)])
+        append_segments(parts, styles, [("", None)])
+        append_segments(parts, styles, [("中文直译：", BLUE_BOLD)])
+        append_segments(parts, styles, [(article_detail(item), None)])
+        image_urls = get_article_extraction(item).get("images", [])
+        for image_index, image_url in enumerate(image_urls, 1):
+            append_segments(parts, styles, [(f"原文图片 {image_index}：{image_url}", None)])
 
     append_segments(parts, styles, [("", None)])
     append_segments(parts, styles, [("今日结论：", None)])
@@ -1132,7 +1161,34 @@ def style_to_css(style: dict) -> str:
     return "; ".join(declarations)
 
 
-def body_to_html(body: str, styles: list[dict] | None = None) -> str:
+def collect_inline_images(items: list[dict]) -> list[dict]:
+    inline_images: list[dict] = []
+    seen: set[str] = set()
+    for item_index, item in enumerate(items, 1):
+        for image_index, image_url in enumerate(get_article_extraction(item).get("images", []), 1):
+            if image_url in seen:
+                continue
+            seen.add(image_url)
+            try:
+                data = fetch_url(image_url, timeout=20)
+                if not data or len(data) > 8 * 1024 * 1024:
+                    raise RuntimeError("image is empty or exceeds 8 MB")
+                subtype = mimetypes.guess_type(image_url)[0] or "image/jpeg"
+                subtype = subtype.split("/", 1)[-1].replace("jpg", "jpeg")
+                if subtype not in {"jpeg", "png", "gif", "webp"}:
+                    subtype = "jpeg"
+                inline_images.append({
+                    "url": image_url,
+                    "cid": f"ai-daily-{item_index}-{image_index}@inline",
+                    "data": data,
+                    "subtype": subtype,
+                })
+            except Exception as exc:
+                log(f"Article image download failed; keeping URL only: {image_url}: {exc}")
+    return inline_images
+
+
+def body_to_html(body: str, styles: list[dict] | None = None, inline_images: list[dict] | None = None) -> str:
     styles = sorted(styles or [], key=lambda item: item["start"])
     pieces = []
     cursor = 0
@@ -1148,6 +1204,13 @@ def body_to_html(body: str, styles: list[dict] | None = None) -> str:
     if cursor < len(body):
         pieces.append(html.escape(body[cursor:]))
     content = "".join(pieces)
+    for image in inline_images or []:
+        image_url = html.escape(image["url"])
+        image_html = (
+            f'<a href="{image_url}"><img src="cid:{image["cid"]}" '
+            'style="display:block;max-width:100%;height:auto;margin:10px 0" /></a>'
+        )
+        content = content.replace(image_url, image_html)
     return (
         '<!doctype html><html><body>'
         '<div style="font-family: -apple-system, BlinkMacSystemFont, '
@@ -1204,7 +1267,7 @@ def send_via_mail(body_path: Path, recipients: list[str], styles: list[dict] | N
         raise RuntimeError("Some Mail sends failed: " + " | ".join(failures))
 
 
-def send_via_smtp(body_path: Path, recipients: list[str], styles: list[dict] | None = None) -> None:
+def send_via_smtp(body_path: Path, recipients: list[str], styles: list[dict] | None = None, inline_images: list[dict] | None = None) -> None:
     config = load_smtp_config()
     missing = [key for key in ["host", "port", "user", "from", "password"] if not config.get(key)]
     if missing:
@@ -1215,7 +1278,7 @@ def send_via_smtp(body_path: Path, recipients: list[str], styles: list[dict] | N
         )
 
     body = body_path.read_text("utf-8")
-    html_body = body_to_html(body, styles)
+    html_body = body_to_html(body, styles, inline_images)
     failures = []
     for recipient in recipients:
         log(f"Sending SMTP message to {recipient}")
@@ -1225,6 +1288,14 @@ def send_via_smtp(body_path: Path, recipients: list[str], styles: list[dict] | N
         message["Subject"] = SUBJECT
         message.set_content(body)
         message.add_alternative(html_body, subtype="html")
+        html_part = message.get_payload()[-1]
+        for image in inline_images or []:
+            html_part.add_related(
+                image["data"],
+                maintype="image",
+                subtype=image["subtype"],
+                cid=f"<{image['cid']}>",
+            )
         try:
             with smtplib.SMTP(config["host"], int(config["port"]), timeout=60) as smtp:
                 smtp.ehlo()
@@ -1326,6 +1397,7 @@ def main() -> int:
     body, styles = build_body_with_styles(selected, glossary_terms)
     body_path = write_body(body)
     log(f"Wrote {body_path}")
+    inline_images = collect_inline_images(selected)
 
     if args.send:
         recipients = TEST_RECIPIENTS if args.test else RECIPIENTS
@@ -1337,7 +1409,7 @@ def main() -> int:
             send_via_gmail(body_path, recipients)
         elif args.smtp or smtp_is_configured():
             log(f"Sending through SMTP to {', '.join(recipients)}")
-            send_via_smtp(body_path, recipients, styles)
+            send_via_smtp(body_path, recipients, styles, inline_images)
         else:
             log("SMTP is not configured; falling back to Gmail web")
             log(f"Sending through Gmail web to {', '.join(recipients)}")
