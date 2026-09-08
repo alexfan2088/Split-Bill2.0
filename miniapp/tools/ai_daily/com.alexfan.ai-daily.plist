@@ -11,12 +11,20 @@
   <key>WorkingDirectory</key>
   <string>/Users/fwp-mac/dev/Split-Bill2.0/miniapp</string>
   <key>StartCalendarInterval</key>
-  <dict>
-    <key>Hour</key>
-    <integer>7</integer>
-    <key>Minute</key>
-    <integer>30</integer>
-  </dict>
+  <array>
+    <dict>
+      <key>Hour</key>
+      <integer>7</integer>
+      <key>Minute</key>
+      <integer>30</integer>
+    </dict>
+    <dict>
+      <key>Hour</key>
+      <integer>8</integer>
+      <key>Minute</key>
+      <integer>0</integer>
+    </dict>
+  </array>
   <key>StandardOutPath</key>
   <string>/Users/fwp-mac/Library/Logs/ai-daily.log</string>
   <key>StandardErrorPath</key>

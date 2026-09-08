@@ -633,17 +633,20 @@ def score_item(item: dict) -> int:
 
 def load_state() -> dict:
     if not STATE_PATH.exists():
-        return {"sent_urls": []}
+        return {"sent_urls": [], "last_success_date": ""}
     try:
         return json.loads(STATE_PATH.read_text("utf-8"))
     except Exception:
-        return {"sent_urls": []}
+        return {"sent_urls": [], "last_success_date": ""}
 
 
 def save_state(state: dict) -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     urls = list(dict.fromkeys(state.get("sent_urls", [])))[-500:]
-    STATE_PATH.write_text(json.dumps({"sent_urls": urls}, ensure_ascii=False, indent=2), "utf-8")
+    STATE_PATH.write_text(
+        json.dumps({"sent_urls": urls, "last_success_date": state.get("last_success_date", "")}, ensure_ascii=False, indent=2),
+        "utf-8",
+    )
 
 
 def load_glossary_state() -> dict:
@@ -1507,6 +1510,10 @@ def main() -> int:
     args = parser.parse_args()
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    today = dt.datetime.now().strftime("%Y-%m-%d")
+    if args.send and not args.test and load_state().get("last_success_date") == today:
+        log(f"AI 日报已于 {today} 成功发送；跳过本次重复触发")
+        return 0
     log("Collecting AI news")
     items = collect_items()
     if len(items) < ITEM_LIMIT:
@@ -1538,6 +1545,7 @@ def main() -> int:
         else:
             state = load_state()
             state["sent_urls"] = list(dict.fromkeys(state.get("sent_urls", []) + [i["url"] for i in selected]))
+            state["last_success_date"] = today
             save_state(state)
             save_glossary_state(glossary_terms)
         log("Send command completed")
