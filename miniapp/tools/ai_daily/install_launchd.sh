@@ -7,10 +7,17 @@ DST="${HOME}/Library/LaunchAgents/${LABEL}.plist"
 AWAKE_LABEL="com.alexfan.ai-daily-awake"
 AWAKE_SRC="/Users/fwp-mac/dev/Split-Bill2.0/miniapp/tools/ai_daily/${AWAKE_LABEL}.plist"
 AWAKE_DST="${HOME}/Library/LaunchAgents/${AWAKE_LABEL}.plist"
+SCRIPT_DIR="/Users/fwp-mac/dev/Split-Bill2.0/miniapp/tools/ai_daily"
+VENV_DIR="${SCRIPT_DIR}/.venv"
 
 mkdir -p "${HOME}/Library/LaunchAgents" "${HOME}/Library/Logs" "${HOME}/.codex/ai_daily/out"
 chmod +x "/Users/fwp-mac/dev/Split-Bill2.0/miniapp/tools/ai_daily/ai_daily.py"
 chmod +x "/Users/fwp-mac/dev/Split-Bill2.0/miniapp/tools/ai_daily/ai_daily_awake.sh"
+chmod +x "${SCRIPT_DIR}/run_ai_daily.sh"
+if [[ ! -x "${VENV_DIR}/bin/python" ]]; then
+  /opt/homebrew/bin/python3 -m venv "${VENV_DIR}"
+fi
+"${VENV_DIR}/bin/python" -m pip install -r "${SCRIPT_DIR}/requirements.txt"
 plutil -lint "${SRC}"
 cp "${SRC}" "${DST}"
 chmod 644 "${DST}"

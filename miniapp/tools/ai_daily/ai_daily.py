@@ -364,9 +364,20 @@ def extract_article_blocks(page: str, article_url: str) -> list[dict]:
     """Return readable text and figure blocks in source order for the translated PDF."""
     blocks: list[dict] = []
     seen_images: set[str] = set()
-    pattern = r"(?is)<(p|figure)\b[^>]*>(.*?)</\1>"
+    # 同时匹配独立图片标签：许多 WordPress 文章把 img 直接放在正文流中。
+    pattern = r"(?is)<p\b[^>]*>.*?</p>|<figure\b[^>]*>.*?</figure>|<img\b[^>]*>"
     for match in re.finditer(pattern, page):
-        tag, fragment = match.group(1).lower(), match.group(2)
+        fragment = match.group(0)
+        tag_match = re.match(r"(?is)<(p|figure|img)\b", fragment)
+        if not tag_match:
+            continue
+        tag = tag_match.group(1).lower()
+        if tag == "img":
+            image_url = extract_image_url(fragment, article_url)
+            if image_url and image_url not in seen_images and len(seen_images) < MAX_IMAGES_PER_ARTICLE:
+                blocks.append({"type": "image", "url": image_url, "caption": ""})
+                seen_images.add(image_url)
+            continue
         if tag == "figure":
             image_url = extract_image_url(fragment, article_url)
             if image_url and image_url not in seen_images and len(seen_images) < MAX_IMAGES_PER_ARTICLE:
@@ -377,10 +388,15 @@ def extract_article_blocks(page: str, article_url: str) -> list[dict]:
             continue
         text = clean_text(fragment)
         if len(text) < 60:
-            continue
-        if any(skip in text.lower() for skip in ["cookie", "subscribe", "newsletter", "advertisement", "sign up"]):
-            continue
-        blocks.append({"type": "text", "text": text})
+            text = ""
+        if text and not any(skip in text.lower() for skip in ["cookie", "subscribe", "newsletter", "advertisement", "sign up"]):
+            blocks.append({"type": "text", "text": text})
+        # WordPress 等站点常把正文图直接放进 p 标签，而不使用 figure。
+        # 此处紧跟该段落写入图片，避免所有图在文末集中堆积。
+        image_url = extract_image_url(fragment, article_url)
+        if image_url and image_url not in seen_images and len(seen_images) < MAX_IMAGES_PER_ARTICLE:
+            blocks.append({"type": "image", "url": image_url, "caption": ""})
+            seen_images.add(image_url)
     return blocks
 
 

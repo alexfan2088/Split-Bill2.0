@@ -6,9 +6,7 @@
   <string>com.alexfan.ai-daily</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/opt/homebrew/bin/python3</string>
-    <string>/Users/fwp-mac/dev/Split-Bill2.0/miniapp/tools/ai_daily/ai_daily.py</string>
-    <string>--send</string>
+    <string>/Users/fwp-mac/dev/Split-Bill2.0/miniapp/tools/ai_daily/run_ai_daily.sh</string>
   </array>
   <key>WorkingDirectory</key>
   <string>/Users/fwp-mac/dev/Split-Bill2.0/miniapp</string>
