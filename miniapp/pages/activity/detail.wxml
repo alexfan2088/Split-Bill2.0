@@ -21,7 +21,7 @@
     <view class="summary-info">
       <view class="summary-info-item summary-info-row">
         <view class="summary-info-left">
-          <text class="summary-label">总支出：</text>
+          <text class="summary-label">{{isParent ? '家庭总支出：' : '账单总支出：'}}</text>
           <text class="summary-value amount">¥{{total}}</text>
         </view>
         <view class="summary-actions">
@@ -30,8 +30,9 @@
         </view>
       </view>
       <view class="summary-info-item">
+        <text wx:if="{{!isParent}}" class="summary-label">家庭支出：¥{{familyExpense}}{{hasCustomFamilyExpense ? '（已手动设置）' : '（默认等于账单总支出）'}}</text>
         <text wx:if="{{isParent}}" class="summary-label">二级活动：{{childCount}} 个</text>
-        <text wx:else class="summary-label">{{dateRange}} | 账单数量：{{bills.length}} 条</text>
+        <text wx:if="{{!isParent}}" class="summary-label detail-date-range">{{dateRange}} | 账单数量：{{bills.length}} 条</text>
       </view>
     </view>
   </view>
@@ -136,7 +137,7 @@
             </view>
             <view class="child-activity-date">{{item.dateRange}}</view>
           </view>
-          <view class="child-activity-total"><text class="child-activity-total-label">总支出</text> ¥{{item.total}}</view>
+          <view class="child-activity-total"><text class="child-activity-total-label">家庭支出</text> ¥{{item.total}}</view>
         </view>
       </view>
       <!-- 预存活动的特殊显示 -->

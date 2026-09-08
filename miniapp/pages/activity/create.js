@@ -25,7 +25,9 @@ Page({
     formattedRemark: [], // 格式化后的备注内容（用于显示高亮）
     isParent: false,
     parentId: '',
-    parentName: ''
+    parentName: '',
+    // 留空时自动使用活动账单总支出；填写后作为本家庭的实际支出。
+    familyExpenseInput: ''
   },
   
   onShareAppMessage() {
@@ -117,6 +119,7 @@ Page({
           originalMemberNames: memberNames,
           isParent,
           parentId: activity.parentId || '',
+          familyExpenseInput: activity.familyExpense === undefined || activity.familyExpense === null ? '' : String(activity.familyExpense),
         });
         if (activity.parentId) {
           await this.loadParentName(activity.parentId);
@@ -154,6 +157,20 @@ Page({
   
   onNameInput(e) {
     this.setData({ name: e.detail.value });
+  },
+
+  onFamilyExpenseInput(e) {
+    this.setData({ familyExpenseInput: e.detail.value });
+  },
+
+  getFamilyExpenseValue() {
+    const raw = String(this.data.familyExpenseInput || '').trim();
+    if (!raw) return null;
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value < 0) {
+      throw new Error('家庭支出请输入不小于 0 的金额');
+    }
+    return Math.round(value * 100) / 100;
   },
 
   async loadParentName(parentId, fallbackName = '') {
@@ -654,6 +671,13 @@ Page({
     let type = this.data.type.trim();
     if (!type) type = '聚餐';
     const remark = this.data.remark.trim();
+    let familyExpense;
+    try {
+      familyExpense = this.getFamilyExpenseValue();
+    } catch (e) {
+      wx.showToast({ title: e.message, icon: 'none' });
+      return;
+    }
     
     if (!name) {
       wx.showToast({
@@ -751,6 +775,7 @@ Page({
           isPrepaid: isParent ? false : this.data.isPrepaid,
           members,
           memberNames,
+          familyExpense,
           updatedAt: new Date()
         };
         updateData.isParent = isParent;
@@ -806,6 +831,9 @@ Page({
           creator: userName,
           createdAt: new Date()
         };
+        if (familyExpense !== null) {
+          createData.familyExpense = familyExpense;
+        }
         if (this.data.parentId) {
           createData.parentId = this.data.parentId;
         }

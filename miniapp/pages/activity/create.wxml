@@ -15,6 +15,12 @@
     </view>
 
     <view wx:if="{{parentId}}" class="parent-notice">当前创建的是「{{parentName}}」下的二级活动</view>
+
+    <view wx:if="{{!isParent}}" class="form-item">
+      <text class="label">家庭支出</text>
+      <input class="input" type="digit" placeholder="留空则自动等于账单总支出" value="{{familyExpenseInput}}" bindinput="onFamilyExpenseInput" />
+      <view class="hint">用于记录本家庭实际承担的支出；二级活动填写后，父活动总支出将按此金额计算。</view>
+    </view>
     
 
     <view wx:if="{{!isParent}}" class="form-item">

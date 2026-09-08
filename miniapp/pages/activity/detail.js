@@ -42,6 +42,8 @@ Page({
     ,childActivities: []
     ,childCount: 0
     ,pdfChildDetails: []
+    ,familyExpense: '0.00'
+    ,hasCustomFamilyExpense: false
   },
   
   onShareAppMessage() {
@@ -175,6 +177,7 @@ Page({
       
       // 计算总支出和人均
       const total = bills.reduce((sum, b) => sum + (Number(b.amount) || 0), 0);
+      const familyExpense = this.getFamilyExpense(activity, total);
       
       // 计算总权重：基于所有账单的participants权重之和
       // 如果账单有participants，使用账单的权重；否则使用活动成员的默认权重
@@ -270,6 +273,8 @@ Page({
         rawRecharges: recharges, // 保存原始充值数据
         members,
         total: this.formatAmount(total),
+        familyExpense: this.formatAmount(familyExpense),
+        hasCustomFamilyExpense: this.hasCustomFamilyExpense(activity),
         avg: this.formatAmount(avg),
         dateRange,
         suggestionMember,
@@ -363,7 +368,8 @@ Page({
           if (name && !balancesByMember[name]) balancesByMember[name] = { paid: 0, shouldPay: 0, balance: 0 };
         });
         allBills.push(...bills.map(bill => ({ ...bill, childActivityName: child.name })));
-        const total = bills.reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
+        const billTotal = bills.reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
+        const total = this.getFamilyExpense(child, billTotal);
         const memberNames = (child.members || [])
           .map(member => typeof member === 'string' ? member : member.name)
           .filter(Boolean);
@@ -373,10 +379,15 @@ Page({
           type: child.type || '',
           memberNames: memberNames.join('、') || '暂无成员',
           dateRange: this.calculateDateRange(bills),
-          total: this.formatAmount(total)
+          total: this.formatAmount(total),
+          billTotal: this.formatAmount(billTotal),
+          hasCustomFamilyExpense: this.hasCustomFamilyExpense(child)
         };
       });
-      const total = allBills.reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
+      const total = children.reduce((sum, item) => {
+        const billTotal = (item.bills || []).reduce((childSum, bill) => childSum + (Number(bill.amount) || 0), 0);
+        return sum + this.getFamilyExpense(item.activity || {}, billTotal);
+      }, 0);
       const members = Object.keys(balancesByMember).map(name => {
         const bal = balancesByMember[name];
         return {
@@ -401,6 +412,8 @@ Page({
         recharges: [],
         members,
         total: this.formatAmount(total),
+        familyExpense: this.formatAmount(total),
+        hasCustomFamilyExpense: false,
         avg: '0.00',
         dateRange: '',
         childActivities,
@@ -417,6 +430,15 @@ Page({
     } finally {
       wx.hideLoading();
     }
+  },
+
+  hasCustomFamilyExpense(activity) {
+    const value = activity && activity.familyExpense;
+    return value !== undefined && value !== null && value !== '' && Number.isFinite(Number(value)) && Number(value) >= 0;
+  },
+
+  getFamilyExpense(activity, billTotal) {
+    return this.hasCustomFamilyExpense(activity) ? Number(activity.familyExpense) : (Number(billTotal) || 0);
   },
   
   // 生成圆圈数据
@@ -1673,6 +1695,9 @@ Page({
     const activityDateRange = (source && source.dateRange) || this.data.dateRange || '';
     const activityTotal = source && source.total !== undefined ? this.formatAmount(source.total) : this.data.total;
     const activityAvg = source && source.avg !== undefined ? this.formatAmount(source.avg) : this.data.avg;
+    const activityFamilyExpense = source && source.familyExpense !== undefined
+      ? this.formatAmount(source.familyExpense)
+      : this.data.familyExpense;
     const defaultFileName = fileName || `${activity.name || '活动'}-${this.formatYymmdd(new Date())}.pdf`;
 
     const pageWidth = 820;
@@ -1789,6 +1814,7 @@ Page({
     addText(`创建者：${creator}`);
     addText(`成员：${memberNames || '无'}`);
     addText(`活动属性：${prepaidInfo}`);
+    addText(`家庭支出：¥${activityFamilyExpense || activityTotal}`);
     addText(`账单范围：${activityDateRange || '至今'}，账单数量：${bills.length} 条`);
     addText(`导出时间：${exportTime}`);
     addText(`PDF文件：${this.normalizeAsciiDigits(defaultFileName)}`);
@@ -2002,7 +2028,10 @@ Page({
     const addBlank = () => pushLine({ type: 'text', text: '', fontSize: 20, color: '#111111' });
     const allBills = children.reduce((records, item) => records.concat(item.bills || []), []);
     const parentDateRange = this.calculateDateRange(allBills);
-    const total = allBills.reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
+    const total = children.reduce((sum, item) => {
+      const billTotal = (item.bills || []).reduce((childSum, bill) => childSum + (Number(bill.amount) || 0), 0);
+      return sum + this.getFamilyExpense(item.activity || {}, billTotal);
+    }, 0);
 
     addText('父活动信息', { title: true });
     addText(`父活动名称：${parent.name || '未命名父活动'}`);
@@ -2025,11 +2054,12 @@ Page({
           .map(member => typeof member === 'string' ? member : member.name)
           .filter(Boolean)
           .join('、');
-        const childTotal = (item.bills || []).reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
+        const billTotal = (item.bills || []).reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
+        const childTotal = this.getFamilyExpense(child, billTotal);
         addText(`${index + 1}. 二级活动名称：${child.name || '未命名活动'}`);
         addText(`   创建者：${child.creator || '未设置'}`);
         addText(`   参与成员：${members || '无'}`);
-        addText(`   总支出：¥${this.formatAmount(childTotal)}`);
+        addText(`   家庭支出：¥${this.formatAmount(childTotal)}`);
         addBlank();
       });
     }
@@ -2067,7 +2097,8 @@ Page({
         members,
         total: childTotal,
         avg: childTotal / (totalWeight || fallbackWeight),
-        dateRange: this.calculateDateRange(bills)
+        dateRange: this.calculateDateRange(bills),
+        familyExpense: this.getFamilyExpense(child, childTotal)
       });
       // 每份子活动内容之前增加清晰分隔，之后完整复用原子活动 PDF 内容。
       pages.push([{
