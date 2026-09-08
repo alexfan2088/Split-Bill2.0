@@ -20,6 +20,15 @@ async function hydrateMembers(db, activity) {
   return { ...activity, members, memberNames: members.map(getName).filter(Boolean) };
 }
 
+function getTimestamp(record, field) {
+  const value = record[field] || record.createdAt;
+  return value && value.getTime ? value.getTime() : new Date(value || 0).getTime();
+}
+
+function sortLatestFirst(records, field) {
+  return records.sort((a, b) => getTimestamp(b, field) - getTimestamp(a, field));
+}
+
 async function getParentActivityDetail(db, parentId, userName) {
   const parentDoc = await db.collection('activities').doc(parentId).get();
   if (!parentDoc.data || !parentDoc.data.isParent) return { success: false, error: '父活动不存在' };
@@ -33,8 +42,10 @@ async function getParentActivityDetail(db, parentId, userName) {
 
   const details = await Promise.all(hydratedChildren.map(async child => ({
     activity: child,
-    bills: await fetchAll(db, 'bills', { activityId: child._id }),
-    recharges: child.isPrepaid ? await fetchAll(db, 'recharges', { activityId: child._id }) : []
+    bills: sortLatestFirst(await fetchAll(db, 'bills', { activityId: child._id }), 'time'),
+    recharges: child.isPrepaid
+      ? sortLatestFirst(await fetchAll(db, 'recharges', { activityId: child._id }), 'date')
+      : []
   })));
 
   return { success: true, activity: parent, children: details };

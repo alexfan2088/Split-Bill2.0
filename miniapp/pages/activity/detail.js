@@ -41,6 +41,7 @@ Page({
     ,isParent: false
     ,childActivities: []
     ,childCount: 0
+    ,pdfChildDetails: []
   },
   
   onShareAppMessage() {
@@ -404,6 +405,8 @@ Page({
         dateRange: '',
         childActivities,
         childCount: childActivities.length,
+        // 保留导出所需的完整子活动数据，生成父活动 PDF 时逐个复用子活动的原有导出内容。
+        pdfChildDetails: children,
         totalRecharge: '0.00',
         totalConsume: this.formatAmount(total),
         remaining: '0.00'
@@ -1656,13 +1659,20 @@ Page({
     return results;
   },
 
-  buildPdfPages(fileName) {
-    const activity = this.data.activity || {};
-    const bills = this.data.rawBills || [];
-    const members = this.data.members || [];
-    const rawRecharges = this.data.rawRecharges || [];
-    const isPrepaid = this.data.isPrepaid || false;
-    const keeper = this.data.keeper || '';
+  buildPdfPages(fileName, source) {
+    if (!source && this.data.isParent) {
+      return this.buildParentPdfPages(fileName);
+    }
+
+    const activity = (source && source.activity) || this.data.activity || {};
+    const bills = (source && source.bills) || this.data.rawBills || [];
+    const members = (source && source.members) || this.data.members || [];
+    const rawRecharges = (source && source.recharges) || this.data.rawRecharges || [];
+    const isPrepaid = source ? !!activity.isPrepaid : (this.data.isPrepaid || false);
+    const keeper = source ? (activity.keeper || '') : (this.data.keeper || '');
+    const activityDateRange = (source && source.dateRange) || this.data.dateRange || '';
+    const activityTotal = source && source.total !== undefined ? this.formatAmount(source.total) : this.data.total;
+    const activityAvg = source && source.avg !== undefined ? this.formatAmount(source.avg) : this.data.avg;
     const defaultFileName = fileName || `${activity.name || '活动'}-${this.formatYymmdd(new Date())}.pdf`;
 
     const pageWidth = 820;
@@ -1779,7 +1789,7 @@ Page({
     addText(`创建者：${creator}`);
     addText(`成员：${memberNames || '无'}`);
     addText(`活动属性：${prepaidInfo}`);
-    addText(`账单范围：${this.data.dateRange || '至今'}，账单数量：${bills.length} 条`);
+    addText(`账单范围：${activityDateRange || '至今'}，账单数量：${bills.length} 条`);
     addText(`导出时间：${exportTime}`);
     addText(`PDF文件：${this.normalizeAsciiDigits(defaultFileName)}`);
 
@@ -1827,7 +1837,7 @@ Page({
 
     // 结算信息
     addTitle('结算信息');
-    addText(`总支出：¥${this.data.total}，人均：¥${this.data.avg}`);
+    addText(`总支出：¥${activityTotal}，人均：¥${activityAvg}`);
     const memberColName = 180;
     const memberColPaid = 150;
     const memberColShould = 150;
@@ -1950,6 +1960,125 @@ Page({
         attachmentIndex: index + 1,
         attachmentTotal: attachmentPages.length
       });
+    });
+
+    return { pages, pageWidth, pageHeight, padding, lineHeight };
+  },
+
+  buildParentPdfPages(fileName) {
+    const parent = this.data.activity || {};
+    const children = this.data.pdfChildDetails || [];
+    const pageWidth = 820;
+    const pageHeight = 1200;
+    const padding = 32;
+    const lineHeight = 32;
+    const maxLines = Math.floor((pageHeight - padding * 2) / lineHeight);
+    const pages = [[]];
+    let lineCount = 0;
+    const pushLine = (line) => {
+      if (lineCount >= maxLines) {
+        pages.push([]);
+        lineCount = 0;
+      }
+      pages[pages.length - 1].push(line);
+      lineCount += 1;
+    };
+    const addText = (text, options = {}) => {
+      const value = String(text || '');
+      // PDF 使用固定字号；将超长成员名单换行，防止内容超出页面。
+      const limit = options.title ? 30 : 36;
+      for (let index = 0; index < value.length || index === 0; index += limit) {
+        pushLine({
+          type: 'text',
+          text: value.slice(index, index + limit),
+          fontSize: options.title ? 26 : 20,
+          color: options.title ? '#1d4ed8' : '#111111',
+          bold: !!options.title,
+          role: options.title ? 'title' : 'body'
+        });
+        if (!value.length) break;
+      }
+    };
+    const addBlank = () => pushLine({ type: 'text', text: '', fontSize: 20, color: '#111111' });
+    const allBills = children.reduce((records, item) => records.concat(item.bills || []), []);
+    const parentDateRange = this.calculateDateRange(allBills);
+    const total = allBills.reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
+
+    addText('父活动信息', { title: true });
+    addText(`父活动名称：${parent.name || '未命名父活动'}`);
+    addText(`创建者：${parent.creator || '未设置'}`);
+    addText('活动属性：父活动');
+    addText(`总支出：¥${this.formatAmount(total)}`);
+    addText(`起止日期：${parentDateRange || '至今'}`);
+    addText(`包含二级活动：${children.length} 个`);
+    addText(`导出时间：${this.formatExportTime(new Date())}`);
+    addText(`PDF文件：${this.normalizeAsciiDigits(fileName || '')}`);
+    addBlank();
+    addText('二级活动清单', { title: true });
+
+    if (children.length === 0) {
+      addText('暂无二级活动');
+    } else {
+      children.forEach((item, index) => {
+        const child = item.activity || {};
+        const members = (child.members || [])
+          .map(member => typeof member === 'string' ? member : member.name)
+          .filter(Boolean)
+          .join('、');
+        const childTotal = (item.bills || []).reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
+        addText(`${index + 1}. 二级活动名称：${child.name || '未命名活动'}`);
+        addText(`   创建者：${child.creator || '未设置'}`);
+        addText(`   参与成员：${members || '无'}`);
+        addText(`   总支出：¥${this.formatAmount(childTotal)}`);
+        addBlank();
+      });
+    }
+
+    children.forEach((item, index) => {
+      const child = item.activity || {};
+      const bills = item.bills || [];
+      const recharges = item.recharges || [];
+      const childMembers = (child.members || []).map(member => {
+        const name = typeof member === 'string' ? member : member.name;
+        return { name };
+      }).filter(member => member.name);
+      const balances = this.calcBalances(child.members || [], bills, recharges, child.isPrepaid ? child.keeper : '');
+      const members = childMembers.map(member => {
+        const balance = balances[member.name] || { paid: 0, shouldPay: 0, balance: 0 };
+        return {
+          name: member.name,
+          bal: {
+            paid: this.formatAmount(balance.paid),
+            shouldPay: this.formatAmount(balance.shouldPay),
+            balance: this.formatAmount(balance.balance)
+          }
+        };
+      });
+      const childTotal = bills.reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
+      const latestBill = bills[0] || {};
+      const totalWeight = latestBill.participants
+        ? Object.keys(latestBill.participants).reduce((sum, name) => sum + Math.max(0, Number(latestBill.participants[name]) || 0), 0)
+        : 0;
+      const fallbackWeight = (child.members || []).reduce((sum, member) => sum + (Number(typeof member === 'string' ? 2 : member.weight) || 2), 0) || 1;
+      const childPages = this.buildPdfPages(fileName, {
+        activity: child,
+        bills,
+        recharges,
+        members,
+        total: childTotal,
+        avg: childTotal / (totalWeight || fallbackWeight),
+        dateRange: this.calculateDateRange(bills)
+      });
+      // 每份子活动内容之前增加清晰分隔，之后完整复用原子活动 PDF 内容。
+      pages.push([{
+        type: 'text',
+        text: `二级活动 ${index + 1}/${children.length}：${child.name || '未命名活动'}`,
+        fontSize: 26,
+        color: '#1d4ed8',
+        bold: true,
+        role: 'title'
+      }]);
+      pages.push(...childPages.pages);
     });
 
     return { pages, pageWidth, pageHeight, padding, lineHeight };
