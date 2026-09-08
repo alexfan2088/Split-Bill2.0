@@ -1367,26 +1367,28 @@ Page({
       const pageData = this.buildPdfPages(fileName);
       setTarget(8);
       startDrift(18, 1, 160);
-      const chunkCount = Math.ceil(pageData.pages.length / 30);
-      progressTotal = chunkCount * 3 + 1;
+      // 云函数需要在单次调用中嵌入中文字体和附件图片。大活动的成员明细会
+      // 反复引用账单，30 页在真机上可能超过调用时限或请求体限制；附件页的
+      // 图片体积也远大于普通文字页，因此按负载而非固定页数分卷。
+      const pageChunks = this.splitPdfPagesForExport(pageData.pages);
+      const chunkCount = pageChunks.length;
+      // 每个分卷一次生成；完成后再生成、下载并保存最终合并文件。
+      progressTotal = chunkCount + 3;
       updateTargetBySteps(progressDone, progressTotal);
-      if (pageData.pages.length > 30) {
+      if (chunkCount > 1) {
         await new Promise((resolve) => {
           wx.showModal({
             title: '提示',
-            content: `当前共 ${pageData.pages.length} 页，将按每30页自动分卷导出。`,
+            content: `当前共 ${pageData.pages.length} 页，将分为 ${chunkCount} 个文件导出。`,
             confirmText: '知道了',
             showCancel: false,
             success: () => resolve()
           });
         });
       }
-      const savedPaths = [];
-      const savedNames = [];
+      const partFileIDs = [];
       for (let i = 0; i < chunkCount; i++) {
-        const start = i * 30;
-        const end = start + 30;
-        const chunkPages = pageData.pages.slice(start, end);
+        const chunkPages = pageChunks[i];
         if (chunkPages.length === 0) continue;
 
         startDrift(70, 1, 160);
@@ -1415,68 +1417,61 @@ Page({
         if (!fileID) {
           throw new Error('PDF生成失败');
         }
-
-        startDrift(82, 1, 180);
-        let tempUrlRes;
-        try {
-          tempUrlRes = await wx.cloud.getTempFileURL({ fileList: [fileID] });
-          console.log('[PDF] tempUrlRes:', tempUrlRes);
-        } catch (e) {
-          console.error('[PDF] getTempFileURL failed:', e);
-          throw e;
-        }
-        const tempUrl = tempUrlRes && tempUrlRes.fileList && tempUrlRes.fileList[0] && tempUrlRes.fileList[0].tempFileURL;
-        if (!tempUrl) {
-          throw new Error('获取下载链接失败');
-        }
-
-        startDrift(88, 1, 180);
-        let downloadRes;
-        let downloadTarget = '';
-        try {
-          // 兼容：手机端通常返回本地 tempFilePath；mac 开发者工具有时会返回 http://tmp/...（无法直接 saveFile）
-          downloadRes = await new Promise((resolve, reject) => {
-            wx.downloadFile({
-              url: tempUrl,
-              success: resolve,
-              fail: reject
-            });
-          });
-
-          const maybePath = (downloadRes && (downloadRes.tempFilePath || downloadRes.filePath)) || '';
-          if (typeof maybePath === 'string' && /^https?:\/\//i.test(maybePath)) {
-            downloadTarget = `${wx.env.USER_DATA_PATH}/__pdf_download_${Date.now()}_${i}.pdf`;
-            downloadRes = await new Promise((resolve, reject) => {
-              wx.downloadFile({
-                url: tempUrl,
-                filePath: downloadTarget,
-                success: resolve,
-                fail: reject
-              });
-            });
-          }
-
-          console.log('[PDF] download status:', downloadRes && downloadRes.statusCode);
-          console.log('[PDF] download path:', downloadRes && (downloadRes.filePath || downloadRes.tempFilePath));
-        } catch (e) {
-          console.error('[PDF] downloadFile failed:', e);
-          throw e;
-        }
-        const localPdfPath = (downloadRes && (downloadRes.filePath || downloadRes.tempFilePath)) || downloadTarget;
-        progressDone += 1;
-        updateTargetBySteps(progressDone, progressTotal);
-
-        const partName = chunkCount > 1 ? `${baseName}-${String(i + 1).padStart(2, '0')}.pdf` : fileName;
-        startDrift(93, 1, 200);
-        const savedPath = await this.savePdfFile(localPdfPath, partName);
-        savedPaths.push(savedPath);
-        savedNames.push(partName);
-        progressDone += 1;
-        updateTargetBySteps(progressDone, progressTotal);
-        setTarget(96);
-
-        wx.cloud.deleteFile({ fileList: [fileID] }).catch(() => {});
+        partFileIDs.push(fileID);
       }
+
+      // 分卷仅用于降低生成压力。全部分卷生成后在云端合并，用户只会得到一个 PDF。
+      startDrift(82, 1, 180);
+      const mergeRes = await wx.cloud.callFunction({
+        name: 'exportActivityPdf',
+        data: { mergeFileIDs: partFileIDs }
+      });
+      progressDone += 1;
+      updateTargetBySteps(progressDone, progressTotal);
+      const mergeResult = mergeRes && mergeRes.result ? mergeRes.result : null;
+      if (!mergeResult || mergeResult.success === false || !mergeResult.fileID) {
+        const errMsg = (mergeResult && mergeResult.error) ? mergeResult.error : 'PDF合并失败';
+        throw new Error(errMsg);
+      }
+
+      let tempUrlRes;
+      try {
+        tempUrlRes = await wx.cloud.getTempFileURL({ fileList: [mergeResult.fileID] });
+      } catch (e) {
+        console.error('[PDF] getTempFileURL failed:', e);
+        throw e;
+      }
+      const tempUrl = tempUrlRes && tempUrlRes.fileList && tempUrlRes.fileList[0] && tempUrlRes.fileList[0].tempFileURL;
+      if (!tempUrl) throw new Error('获取下载链接失败');
+
+      startDrift(88, 1, 180);
+      let downloadRes;
+      let downloadTarget = '';
+      try {
+        downloadRes = await new Promise((resolve, reject) => {
+          wx.downloadFile({ url: tempUrl, success: resolve, fail: reject });
+        });
+        const maybePath = (downloadRes && (downloadRes.tempFilePath || downloadRes.filePath)) || '';
+        if (typeof maybePath === 'string' && /^https?:\/\//i.test(maybePath)) {
+          downloadTarget = `${wx.env.USER_DATA_PATH}/__pdf_download_${Date.now()}.pdf`;
+          downloadRes = await new Promise((resolve, reject) => {
+            wx.downloadFile({ url: tempUrl, filePath: downloadTarget, success: resolve, fail: reject });
+          });
+        }
+      } catch (e) {
+        console.error('[PDF] downloadFile failed:', e);
+        throw e;
+      }
+      const localPdfPath = (downloadRes && (downloadRes.filePath || downloadRes.tempFilePath)) || downloadTarget;
+      progressDone += 1;
+      updateTargetBySteps(progressDone, progressTotal);
+
+      startDrift(93, 1, 200);
+      const savedPath = await this.savePdfFile(localPdfPath, fileName);
+      progressDone += 1;
+      updateTargetBySteps(progressDone, progressTotal);
+      setTarget(96);
+      wx.cloud.deleteFile({ fileList: [...partFileIDs, mergeResult.fileID] }).catch(() => {});
 
       this.setLastPdfDownloadAt(Date.now());
       this.setPdfReminderNextAt(0);
@@ -1487,9 +1482,8 @@ Page({
       setTarget(100);
       stopProgress();
       wx.hideLoading();
-      const nameLine = savedNames.length > 1 ? `文件名：\n${savedNames.join('\n')}` : `文件名：${savedNames[0] || fileName}`;
-      const guideText = `${nameLine}\n如需保存在本地：\n1) 在预览页右上角点击“...”\n2) 选择“转发给朋友”或“保存到手机”`;
-      this._pendingPdfPath = savedPaths[0] || '';
+      const guideText = `文件名：${fileName}\n如需保存在本地：\n1) 在预览页右上角点击“...”\n2) 选择“转发给朋友”或“保存到手机”`;
+      this._pendingPdfPath = savedPath || '';
       this.setData({
         showPdfGuideModal: true,
         pdfGuideText: guideText
@@ -1500,8 +1494,29 @@ Page({
       console.error('导出PDF失败:', e);
       stopProgress();
       wx.hideLoading();
-      wx.showToast({ title: '生成失败', icon: 'none' });
+      const message = String((e && e.message) || '生成失败').replace(/[\r\n]+/g, ' ');
+      wx.showToast({ title: `生成失败：${message.slice(0, 14)}`, icon: 'none' });
     }
+  },
+
+  splitPdfPagesForExport(pages) {
+    const result = [];
+    let current = [];
+    let weight = 0;
+    // 文字页限制为 20 页；一个图片附件按 6 页计，以控制云函数内存和耗时。
+    const maxWeight = 20;
+    (pages || []).forEach((page) => {
+      const pageWeight = page && !Array.isArray(page) && page.type === 'attachment' ? 6 : 1;
+      if (current.length > 0 && weight + pageWeight > maxWeight) {
+        result.push(current);
+        current = [];
+        weight = 0;
+      }
+      current.push(page);
+      weight += pageWeight;
+    });
+    if (current.length > 0) result.push(current);
+    return result;
   },
 
   async savePdfFile(tempFilePath, fileName) {

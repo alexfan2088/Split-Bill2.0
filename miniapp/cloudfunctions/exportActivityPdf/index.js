@@ -7,12 +7,35 @@ const fontkit = require('@pdf-lib/fontkit');
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV });
 
 exports.main = async (event) => {
-  const { pages, pageWidth, pageHeight, padding, lineHeight } = event || {};
-  if (!pages || pages.length === 0) {
-    return { success: false, error: 'missing pages' };
-  }
+  const { pages, pageWidth, pageHeight, padding, lineHeight, mergeFileIDs } = event || {};
 
   try {
+    // 大文件先分卷生成，随后由云端合并。这样前端只下载一个完整 PDF，
+    // 同时避免在单次生成中处理过多页面、字体和附件图片。
+    if (Array.isArray(mergeFileIDs) && mergeFileIDs.length > 0) {
+      const mergedDoc = await PDFDocument.create();
+      for (const fileID of mergeFileIDs) {
+        const downloadRes = await cloud.downloadFile({ fileID });
+        const fileContent = downloadRes && downloadRes.fileContent;
+        if (!fileContent || !fileContent.length) {
+          throw new Error('PDF分卷下载失败');
+        }
+        const sourceDoc = await PDFDocument.load(fileContent);
+        const copiedPages = await mergedDoc.copyPages(sourceDoc, sourceDoc.getPageIndices());
+        copiedPages.forEach((page) => mergedDoc.addPage(page));
+      }
+      const mergedBytes = await mergedDoc.save();
+      const uploadRes = await cloud.uploadFile({
+        cloudPath: `pdf/activity_merged_${Date.now()}_${Math.floor(Math.random() * 100000)}.pdf`,
+        fileContent: Buffer.from(mergedBytes)
+      });
+      return { success: true, fileID: uploadRes.fileID };
+    }
+
+    if (!pages || pages.length === 0) {
+      return { success: false, error: 'missing pages' };
+    }
+
     const pdfDoc = await PDFDocument.create();
     pdfDoc.registerFontkit(fontkit);
 
