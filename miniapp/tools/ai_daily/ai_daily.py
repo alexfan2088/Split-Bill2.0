@@ -29,13 +29,11 @@ GLOSSARY_STATE_PATH = DATA_DIR / "glossary_state.json"
 SMTP_CONFIG_PATH = DATA_DIR / "smtp.json"
 ITEM_LIMIT = 5
 RECIPIENTS = [
-    "1394628250@qq.com",
-    "1347191150@qq.com",
-    "376622979@qq.com",
     "hruicn@gmail.com",
     "rocket.tang@163.com",
+    "alexfan2088@gmail.com",
 ]
-TEST_RECIPIENTS = ["1394628250@qq.com"]
+TEST_RECIPIENTS = ["alexfan2088@gmail.com"]
 SUBJECT = "AI 每天观察"
 SMTP_KEYCHAIN_SERVICE = "ai-daily-smtp-password"
 
