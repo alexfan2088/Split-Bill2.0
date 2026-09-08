@@ -78,6 +78,20 @@ async function verifyUser(userName, passwordHash, passwordPlain) {
   return { ok: true, user };
 }
 
+// 将最近记账时间冗余到活动上，列表页可直接排序，避免逐活动查询最新账单。
+async function touchActivityLastBillAt(activityId) {
+  if (!activityId) return;
+  const now = new Date();
+  try {
+    await db.collection('activities').doc(activityId).update({
+      data: { lastBillAt: now, updatedAt: now }
+    });
+  } catch (e) {
+    // 账单已成功保存时，不因列表排序字段同步失败而回滚记账操作。
+    console.error('更新活动最近记账时间失败:', e);
+  }
+}
+
 exports.main = async (event) => {
   const { action } = event || {};
 
@@ -98,6 +112,7 @@ exports.main = async (event) => {
           createdAt: new Date()
         }
       });
+      await touchActivityLastBillAt(billData.activityId);
       return { success: true, billId: result._id };
     }
 
@@ -131,6 +146,7 @@ exports.main = async (event) => {
       }
 
       await db.collection('bills').doc(billId).remove();
+      await touchActivityLastBillAt(bill.activityId);
       const attachmentCleanup = await deleteUnreferencedAttachments(db, cloud, bill.attachments);
       return { success: true, attachmentCleanup };
     }
@@ -208,6 +224,7 @@ exports.main = async (event) => {
       };
 
       await db.collection('bills').doc(billId).set({ data: cleanBillData });
+      await touchActivityLastBillAt(cleanBillData.activityId);
       const nextAttachmentIDs = new Set(normalizeAttachmentFileIDs(cleanBillData.attachments));
       const removedAttachments = previousAttachmentIDs.filter(fileID => !nextAttachmentIDs.has(fileID));
       const attachmentCleanup = await deleteUnreferencedAttachments(db, cloud, removedAttachments);

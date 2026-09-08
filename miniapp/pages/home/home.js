@@ -30,11 +30,9 @@ Page({
   },
   
   onShow() {
-    // 每次显示页面时刷新列表
-    console.log('活动列表页面 onShow 触发，开始重新加载活动列表');
-    // 强制刷新，确保数据正确加载
-    this.setData({ activities: [] });
-    this.loadActivities();
+    // 初次进入时 onLoad 已加载，避免紧接着重复发起一整轮云数据库请求。
+    // 从详情页返回时再刷新，确保新建、编辑后的活动信息及时显示。
+    if (this._activitiesLoaded) this.loadActivities();
   },
   
   loadUserInfo() {
@@ -81,81 +79,20 @@ Page({
         return parentCreatorById[activity.parentId] !== userName;
       });
       
-      // 为每个活动加载最新的成员列表（从groups集合）
-      const activitiesWithMembers = await Promise.all(activities.map(async (act) => {
-        let memberNames = act.memberNames;
-        let members = act.members || [];
-        
-        // 优先从groups集合加载最新成员列表
-        try {
-          const groupRes = await dbCloud.collection('groups')
-            .where({ activityId: act._id })
-            .limit(1)
-            .get();
-          
-          if (groupRes.data && groupRes.data.length > 0 && groupRes.data[0].members) {
-            members = groupRes.data[0].members;
-            // 从members中提取memberNames
-            memberNames = members.map(m => typeof m === 'string' ? m : m.name);
-          } else if (act.members && Array.isArray(act.members)) {
-            // 如果没有group，使用activity中的members
-            members = act.members;
-            memberNames = members.map(m => typeof m === 'string' ? m : m.name);
-          } else if (act.memberNames && Array.isArray(act.memberNames)) {
-            // 如果只有memberNames，使用它
-            memberNames = act.memberNames;
-          } else {
-            memberNames = [];
-          }
-        } catch (e) {
-          console.error('加载活动成员失败:', e);
-          // 如果加载失败，使用activity中的members或memberNames
-          if (act.members && Array.isArray(act.members)) {
-            members = act.members;
-            memberNames = members.map(m => typeof m === 'string' ? m : m.name);
-          } else if (act.memberNames && Array.isArray(act.memberNames)) {
-            memberNames = act.memberNames;
-          } else {
-            memberNames = [];
-          }
-        }
-        
-        // 确保memberNames是数组且不为空
-        const finalMemberNames = Array.isArray(memberNames) && memberNames.length > 0 
-          ? memberNames 
-          : (Array.isArray(members) && members.length > 0 
-              ? members.map(m => typeof m === 'string' ? m : m.name) 
-              : []);
-        
-        // 将成员数组转换为字符串，用于显示
-        const memberNamesText = finalMemberNames.length > 0 
-          ? finalMemberNames.join('、') 
-          : '暂无成员';
-        
-        console.log(`活动 ${act.name} 的成员:`, finalMemberNames, '显示文本:', memberNamesText);
-        console.log(`活动 ${act.name} - isPrepaid 原始值:`, act.isPrepaid, '类型:', typeof act.isPrepaid);
-        
-        // 判断是否是预存活动（支持布尔值、字符串、数字等多种格式）
-        let isPrepaidValue = false;
-        if (act.isPrepaid === true || act.isPrepaid === 'true' || act.isPrepaid === 1 || act.isPrepaid === '1') {
-          isPrepaidValue = true;
-        }
-        console.log(`活动 ${act.name} - isPrepaid 处理后:`, isPrepaidValue);
-        
+      // activities 已保存成员信息；列表页不再为每个活动额外查询 groups 集合。
+      const activitiesWithMembers = activities.map((act) => {
+        const members = Array.isArray(act.members) ? act.members : [];
+        const memberNames = Array.isArray(act.memberNames) && act.memberNames.length > 0
+          ? act.memberNames
+          : members.map(m => typeof m === 'string' ? m : m.name).filter(Boolean);
         return {
           ...act,
-          members: members,
-          memberNames: finalMemberNames, // 数组形式
-          memberNamesText: memberNamesText, // 字符串形式，用于显示
+          memberNames,
+          memberNamesText: memberNames.length > 0 ? memberNames.join('、') : '暂无成员',
           isCreator: act.creator === userName,
-          isPrepaid: isPrepaidValue, // 是否预存活动
+          isPrepaid: act.isPrepaid === true || act.isPrepaid === 'true' || act.isPrepaid === 1 || act.isPrepaid === '1',
           isParent: act.isParent === true
         };
-      }));
-      
-      console.log('活动列表加载完成，活动数量:', activitiesWithMembers.length);
-      activitiesWithMembers.forEach(act => {
-        console.log(`活动 ${act.name} - memberNamesText:`, act.memberNamesText, 'memberNames:', act.memberNames);
       });
       
       // 确保数据正确设置
@@ -165,7 +102,6 @@ Page({
           ? act.memberNames.join('、') 
           : '暂无成员');
         const isPrepaid = act.isPrepaid === true || act.isPrepaid === 'true';
-        console.log(`准备设置 - 活动 ${act.name} - isPrepaid:`, isPrepaid, '原始值:', act.isPrepaid);
         return {
           _id: act._id,
           name: act.name,
@@ -176,68 +112,21 @@ Page({
           isParent: act.isParent === true,
           memberNames: act.memberNames,
           memberNamesText: memberText, // 确保这个字段存在
+          lastBillAt: act.lastBillAt,
+          updatedAt: act.updatedAt,
+          createdAt: act.createdAt
         };
       });
       
-      console.log('准备设置数据，活动数量:', newActivities.length);
-      newActivities.forEach(act => {
-        console.log(`准备设置 - 活动 ${act.name} - memberNamesText:`, act.memberNamesText);
-      });
-      
-      // 查询每个活动的最新账单时间，用于排序（按创建时间或更新时间）
-      const activitiesWithLastBillTime = await Promise.all(newActivities.map(async (act) => {
-        let lastBillTime = null;
-        try {
-          // 先尝试按updatedAt排序查询最新账单
-          let billRes = null;
-          try {
-            billRes = await dbCloud.collection('bills')
-              .where({ activityId: act._id })
-              .orderBy('updatedAt', 'desc')
-              .limit(1)
-              .get();
-          } catch (e) {
-            // 如果updatedAt字段没有索引，尝试按createdAt排序
-            console.log(`按updatedAt查询失败，尝试按createdAt查询:`, e);
-            billRes = await dbCloud.collection('bills')
-              .where({ activityId: act._id })
-              .orderBy('createdAt', 'desc')
-              .limit(1)
-              .get();
-          }
-          
-          if (billRes && billRes.data && billRes.data.length > 0) {
-            const bill = billRes.data[0];
-            // 优先使用账单的updatedAt，如果没有则使用createdAt（不再使用time字段）
-            if (bill.updatedAt) {
-              lastBillTime = bill.updatedAt.getTime ? bill.updatedAt.getTime() : new Date(bill.updatedAt).getTime();
-            } else if (bill.createdAt) {
-              lastBillTime = bill.createdAt.getTime ? bill.createdAt.getTime() : new Date(bill.createdAt).getTime();
-            }
-          }
-        } catch (e) {
-          console.log(`查询活动 ${act.name} 的最新账单失败:`, e);
-          // 如果查询失败，尝试使用活动的更新时间
-          if (act.updatedAt) {
-            lastBillTime = act.updatedAt.getTime ? act.updatedAt.getTime() : new Date(act.updatedAt).getTime();
-          } else if (act.createdAt) {
-            lastBillTime = act.createdAt.getTime ? act.createdAt.getTime() : new Date(act.createdAt).getTime();
-          }
-        }
-        
-        // 如果没有账单，使用活动的创建时间
-        if (!lastBillTime) {
-          if (act.createdAt) {
-            lastBillTime = act.createdAt.getTime ? act.createdAt.getTime() : new Date(act.createdAt).getTime();
-          } else {
-            lastBillTime = 0; // 没有时间信息的活动排到最后
-          }
-        }
-        
-        return {
-          ...act,
-          lastBillTime: lastBillTime
-        };
+      const toTimestamp = (value) => {
+        if (!value) return 0;
+        const timestamp = value.getTime ? value.getTime() : new Date(value).getTime();
+        return Number.isNaN(timestamp) ? 0 : timestamp;
+      };
+      // 最近记账时间由账单云函数同步写回活动，列表无需逐活动查询 bills。
+      const activitiesWithLastBillTime = newActivities.map(act => ({
+        ...act,
+        lastBillTime: toTimestamp(act.lastBillAt || act.updatedAt || act.createdAt)
       }));
       
       // 按照最新账单时间倒序排序（最新的排在最前面）
@@ -248,12 +137,8 @@ Page({
       // 直接设置数据
       this.setData({ 
         activities: activitiesWithLastBillTime 
-      }, () => {
-        console.log('数据设置完成，当前活动列表:', this.data.activities);
-        this.data.activities.forEach(act => {
-          console.log(`设置后 - 活动 ${act.name} - memberNamesText:`, act.memberNamesText);
-        });
       });
+      this._activitiesLoaded = true;
     } catch (e) {
       console.error('加载活动列表失败:', e);
       wx.showToast({
