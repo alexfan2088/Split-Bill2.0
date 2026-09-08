@@ -36,6 +36,7 @@ RECIPIENTS = [
 TEST_RECIPIENTS = ["alexfan2088@gmail.com"]
 SUBJECT = "AI 每天观察"
 SMTP_KEYCHAIN_SERVICE = "ai-daily-smtp-password"
+GOOGLE_TRANSLATE_API_RATE_LIMITED = False
 
 FEEDS = [
     "https://techcrunch.com/category/artificial-intelligence/feed/",
@@ -332,6 +333,7 @@ def extract_article_text(url: str, fallback: str) -> dict:
 
 
 def translate_to_chinese(text: str) -> str:
+    global GOOGLE_TRANSLATE_API_RATE_LIMITED
     if not text or has_chinese(text):
         return text
     # 按句子分段，避免硬切英文单词；每段较短也能降低公共翻译接口超时概率。
@@ -360,41 +362,57 @@ def translate_to_chinese(text: str) -> str:
         translated = ""
         last_error: Exception | None = None
         # 主服务使用 Google；域名切换可避开偶发限流。
-        for host in ("translate.googleapis.com", "translate.google.com"):
-            for attempt in range(2):
-                try:
-                    data = json.loads(fetch_url(f"https://{host}/translate_a/single?{google_query}", timeout=15).decode("utf-8"))
-                    candidate = "".join(part[0] for part in data[0] if part and part[0]).strip()
-                    if candidate and has_chinese(candidate):
-                        translated = candidate
-                        break
-                    raise RuntimeError("translation response contains no Chinese text")
-                except Exception as exc:
-                    last_error = exc
-                    if attempt == 0:
-                        time.sleep(1)
+        for host in (() if GOOGLE_TRANSLATE_API_RATE_LIMITED else ("translate.googleapis.com", "translate.google.com")):
+            try:
+                data = json.loads(fetch_url(f"https://{host}/translate_a/single?{google_query}", timeout=8).decode("utf-8"))
+                candidate = "".join(part[0] for part in data[0] if part and part[0]).strip()
+                if candidate and has_chinese(candidate):
+                    translated = candidate
+                    break
+                raise RuntimeError("translation response contains no Chinese text")
+            except Exception as exc:
+                last_error = exc
+                if getattr(exc, "code", None) == 429:
+                    GOOGLE_TRANSLATE_API_RATE_LIMITED = True
+                    break
             if translated:
                 break
+        if not translated:
+            try:
+                candidate = translate_via_google_web(chunk)
+                if candidate and has_chinese(candidate):
+                    translated = candidate
+                else:
+                    raise RuntimeError("Google web translation response contains no Chinese text")
+            except Exception as exc:
+                last_error = exc
         # 独立的 MyMemory 翻译服务作为第二供应商，避免单一服务异常导致日报无法产出。
         if not translated:
-            for attempt in range(2):
-                try:
-                    data = json.loads(fetch_url(f"https://api.mymemory.translated.net/get?{memory_query}", timeout=20).decode("utf-8"))
-                    candidate = clean_text((data.get("responseData") or {}).get("translatedText", ""))
-                    if candidate and has_chinese(candidate):
-                        translated = candidate
-                        break
+            try:
+                data = json.loads(fetch_url(f"https://api.mymemory.translated.net/get?{memory_query}", timeout=20).decode("utf-8"))
+                candidate = clean_text((data.get("responseData") or {}).get("translatedText", ""))
+                if candidate and has_chinese(candidate):
+                    translated = candidate
+                else:
                     raise RuntimeError("MyMemory response contains no Chinese text")
-                except Exception as exc:
-                    last_error = exc
-                    if attempt == 0:
-                        time.sleep(1)
+            except Exception as exc:
+                last_error = exc
         if not translated:
             raise RuntimeError(
                 f"英文内容未能翻译成中文，已终止本期日报生成，避免发送非中文内容：{last_error}"
             )
         translated_chunks.append(translated)
     return re.sub(r"\s+", " ", "".join(translated_chunks)).strip()
+
+
+def translate_via_google_web(text: str) -> str:
+    """Use Google Translate's mobile web page when the API endpoint is rate-limited."""
+    query = urllib.parse.urlencode({"sl": "auto", "tl": "zh-CN", "q": text})
+    page = fetch_url(f"https://translate.google.com/m?{query}", timeout=20).decode("utf-8")
+    match = re.search(r'<div[^>]*class="result-container"[^>]*>(.*?)</div>', page, flags=re.S)
+    if not match:
+        raise RuntimeError("Google web translation result was not found")
+    return clean_text(html.unescape(match.group(1)))
 
 
 def title_key(title: str) -> str:
@@ -750,7 +768,7 @@ def article_detail(item: dict) -> str:
     if extraction["kind"] == "article":
         if has_chinese(original_text):
             return f"原文内容：{translated_text}"
-        return f"原文全文直译：{translated_text}"
+        return f"原文正文中文直译（共 {len(original_text)} 字符）：{translated_text}"
     if has_chinese(original_text):
         return f"来源摘要内容：{translated_text}"
     return f"来源摘要直译：{translated_text}"
