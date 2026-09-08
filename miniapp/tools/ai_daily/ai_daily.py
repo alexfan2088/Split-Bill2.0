@@ -334,7 +334,17 @@ def extract_article_text(url: str, fallback: str) -> dict:
 def translate_to_chinese(text: str) -> str:
     if not text or has_chinese(text):
         return text
-    chunks = [text[i : i + 1200] for i in range(0, len(text), 1200)]
+    # 按句子分段，避免硬切英文单词；每段较短也能降低公共翻译接口超时概率。
+    chunks: list[str] = []
+    current = ""
+    for sentence in re.split(r"(?<=[.!?])\s+", text):
+        if len(current) + len(sentence) + 1 > 800 and current:
+            chunks.append(current)
+            current = sentence
+        else:
+            current = f"{current} {sentence}".strip()
+    if current:
+        chunks.append(current)
     translated_chunks = []
     for chunk in chunks:
         query = urllib.parse.urlencode(
@@ -346,12 +356,28 @@ def translate_to_chinese(text: str) -> str:
                 "q": chunk,
             }
         )
-        try:
-            data = json.loads(fetch_url(f"https://translate.googleapis.com/translate_a/single?{query}", timeout=15).decode("utf-8"))
-            translated_chunks.append("".join(part[0] for part in data[0] if part and part[0]))
-        except Exception as exc:
-            log(f"Translation failed: {exc}")
-            translated_chunks.append(chunk)
+        translated = ""
+        last_error: Exception | None = None
+        # 备用域名和重试：公共接口偶发限流时不能把英文原文误作为中文译文发送。
+        for host in ("translate.googleapis.com", "translate.google.com"):
+            for attempt in range(2):
+                try:
+                    data = json.loads(fetch_url(f"https://{host}/translate_a/single?{query}", timeout=15).decode("utf-8"))
+                    candidate = "".join(part[0] for part in data[0] if part and part[0]).strip()
+                    if candidate and has_chinese(candidate):
+                        translated = candidate
+                        break
+                    raise RuntimeError("translation response contains no Chinese text")
+                except Exception as exc:
+                    last_error = exc
+                    if attempt == 0:
+                        time.sleep(1)
+            if translated:
+                break
+        if not translated:
+            log(f"Translation failed; omitting untranslated chunk: {last_error}")
+            return ""
+        translated_chunks.append(translated)
     return re.sub(r"\s+", " ", "".join(translated_chunks)).strip()
 
 
@@ -703,6 +729,8 @@ def article_detail(item: dict) -> str:
     extraction = get_article_extraction(item)
     original_text = extraction["text"]
     translated_text = get_translated_extraction(item)
+    if not translated_text and not has_chinese(original_text):
+        return "原文中文翻译暂不可用；本期不展示英文原文，避免将英文误标为中文译文。"
     if extraction["kind"] == "article":
         if has_chinese(original_text):
             return f"原文内容：{translated_text}"
@@ -804,7 +832,7 @@ def specific_meaning(item: dict, translated_text: str) -> str:
     if any(word in title for word in ["robotics", "robots", "humanoid", "physical ai"]):
         if any(word in title for word in ["funding", "raises", "raise", "series"]):
             return "这条消息的核心是资本继续押注 physical AI，但机器人公司的难点会从演示能力转向量产、交付和售后体系。"
-        return "这篇文章强调机器人不会像 Llama 这类软件模型一样出现清晰的开源拐点，因为硬件、传感器、场景和安全约束都会拖慢复制速度。"
+        return "这篇文章的重点是：人形机器人即使已经进入客户现场，收入、现金消耗和估值之间仍可能存在很大差距；商业化能否成立取决于持续部署和客户付费。"
     if any(word in text for word in ["outage", "disruption", "restores access", "中断", "恢复访问"]):
         return "它提醒企业客户，AI 工具一旦嵌入工作流，服务稳定性和供应商依赖就会变成实际运营风险。"
     if any(word in text for word in ["funding", "raises", "valuation", "融资", "估值", "投资"]):
@@ -818,7 +846,7 @@ def chinese_summary(item: dict, index: int) -> str:
     source = item.get("source", "公开来源")
     topic, context, impact, watch = infer_topic(item)
     translated_text = get_translated_extraction(item)
-    fact = compact_fact(translated_text)
+    fact = compact_fact(translated_text) if translated_text else "该报道的中文全文翻译本期生成失败，已保留核心中文解读。"
     meaning = specific_meaning(item, translated_text)
     watchpoint = specific_watchpoint(item, translated_text)
     return (
