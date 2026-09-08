@@ -171,57 +171,18 @@ async function login(userName, password) {
       return { success: false, error: '请输入密码', needPassword: true };
     }
     
-    // 检查用户是否存在
-    // 添加更详细的错误处理
-    let userRes;
-    try {
-      userRes = await db.collection('users')
-        .where({ name: userName })
-        .limit(1)
-        .get();
-    } catch (dbError) {
-      console.error('数据库查询失败:', dbError);
-      // 如果是权限错误，提供更详细的提示
-      if (dbError.errCode === -601034) {
-        throw new Error('数据库权限错误：小程序AppID未在云开发环境中授权。\n\n解决方法：\n1. 在云开发控制台的环境设置中授权小程序AppID\n2. 或在微信开发者工具中开通云开发');
-      }
-      throw dbError;
-    }
-    
-    if (userRes.data.length === 0) {
-      return { success: false, error: '用户不存在', needRegister: true };
-    }
-    
-    const existingUser = userRes.data[0];
-    
-    const passwordToUse = hashPassword(password);
-    
-    // 验证密码
-    if (existingUser.password === passwordToUse) {
-      // 密码正确，登录成功
-      
+    const res = await wx.cloud.callFunction({ name: 'login', data: { action: 'login', userName, password } });
+    const result = (res && res.result) || {};
+    if (result.success) {
+      const passwordToUse = hashPassword(password);
       // 保存到本地存储
       wx.setStorageSync('aa_user_name', userName);
       wx.setStorageSync('aa_user_password', passwordToUse);
       wx.setStorageSync('aa_user_password_plain', password);
 
-      // 记录最近一次登录时间（仅用于后台查看，不影响界面）
-      try {
-        await db.collection('users').doc(existingUser._id).update({
-          data: {
-            lastLoginAt: new Date(),
-            updatedAt: new Date()
-          }
-        });
-      } catch (e) {
-        console.log('更新 lastLoginAt 失败（可忽略）:', e);
-      }
-      
-      return { success: true, userName };
-    } else {
-      // 密码错误
-      return { success: false, error: '密码错误', wrongPassword: true };
+      return { success: true, userName, needsSecuritySetup: !!result.needsSecuritySetup };
     }
+    return result;
   } catch (e) {
     console.error('登录失败:', e);
     return { 
@@ -232,64 +193,19 @@ async function login(userName, password) {
 }
 
 // 用户注册
-async function register(userName, password, confirmPassword) {
+async function register(userName, password, confirmPassword, securityQuestion, securityAnswer) {
   try {
     if (!wx.cloud) {
       throw new Error('云开发未初始化，请检查 app.js 中的云开发配置');
     }
 
-    const userNameError = validateUserName(userName);
-    if (userNameError) {
-      return { success: false, error: userNameError, invalidUserName: true };
-    }
-    
-    // 检查用户是否已存在
-    let userRes;
-    try {
-      userRes = await db.collection('users')
-        .where({ name: userName })
-        .limit(1)
-        .get();
-    } catch (dbError) {
-      console.error('数据库查询失败:', dbError);
-      if (dbError.errCode === -601034) {
-        throw new Error('数据库权限错误：小程序AppID未在云开发环境中授权。\n\n解决方法：\n1. 在云开发控制台的环境设置中授权小程序AppID\n2. 或在微信开发者工具中开通云开发');
-      }
-      throw dbError;
-    }
-    
-    if (userRes.data.length > 0) {
-      return { success: false, error: '用户名已存在，请登录', userExists: true };
-    }
-    
-    // 验证密码
-    if (!password) {
-      return { success: false, error: '请设置密码（至少6位）', needPassword: true };
-    }
-    
-    if (password.length < 6) {
-      return { success: false, error: '密码长度至少6位' };
-    }
-    
-    if (!confirmPassword) {
-      return { success: false, error: '请确认密码', needConfirmPassword: true };
-    }
-    
-    if (password !== confirmPassword) {
-      return { success: false, error: '两次输入的密码不一致' };
-    }
-    
-    // 创建新用户
-    const hashedPassword = hashPassword(password);
-    await db.collection('users').add({
-      data: {
-        name: userName,
-        password: hashedPassword,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        lastLoginAt: new Date()
-      }
+    const res = await wx.cloud.callFunction({
+      name: 'login',
+      data: { action: 'register', userName, password, confirmPassword, securityQuestion, securityAnswer }
     });
+    const result = (res && res.result) || {};
+    if (!result.success) return result;
+    const hashedPassword = hashPassword(password);
     
     // 保存到本地存储
     wx.setStorageSync('aa_user_name', userName);
@@ -304,6 +220,27 @@ async function register(userName, password, confirmPassword) {
       error: e.message || '注册失败，请检查云开发配置和数据库权限'
     };
   }
+}
+
+async function getSecurityQuestion(userName) {
+  const res = await wx.cloud.callFunction({ name: 'login', data: { action: 'getSecurityQuestion', userName } });
+  return (res && res.result) || { success: false, error: '获取密保问题失败' };
+}
+
+async function setupSecurity(userName, password, securityQuestion, securityAnswer) {
+  const res = await wx.cloud.callFunction({ name: 'login', data: { action: 'setupSecurity', userName, password, securityQuestion, securityAnswer } });
+  return (res && res.result) || { success: false, error: '保存密保失败' };
+}
+
+async function resetPassword(userName, securityAnswer, password, confirmPassword) {
+  const res = await wx.cloud.callFunction({ name: 'login', data: { action: 'resetPassword', userName, securityAnswer, password, confirmPassword } });
+  const result = (res && res.result) || { success: false, error: '重置密码失败' };
+  if (result.success) {
+    wx.setStorageSync('aa_user_name', userName);
+    wx.setStorageSync('aa_user_password', hashPassword(password));
+    wx.setStorageSync('aa_user_password_plain', password);
+  }
+  return result;
 }
 
 // 获取活动列表
@@ -470,6 +407,9 @@ module.exports = {
   hashPassword,
   login,
   register,
+  getSecurityQuestion,
+  setupSecurity,
+  resetPassword,
   getActivities,
   getBills,
   saveBill,

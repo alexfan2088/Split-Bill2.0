@@ -22,6 +22,11 @@ Page({
     suggestedUserNames: [],
     hasAgreed: false,
     policyVersion: '2026-08-10',
+    securityQuestion: '',
+    securityAnswer: '',
+    isSecuritySetup: false,
+    isRecoveryMode: false,
+    recoveryQuestion: '',
   },
   
   onShareAppMessage() {
@@ -116,7 +121,9 @@ Page({
       userNameChecking: false,
       userNameAvailable: null,
       userNameCheckText: '',
-      suggestedUserNames: []
+      suggestedUserNames: [],
+      isSecuritySetup: false,
+      isRecoveryMode: false
     });
   },
   
@@ -142,7 +149,9 @@ Page({
       userNameChecking: false,
       userNameAvailable: null,
       userNameCheckText: '',
-      suggestedUserNames: []
+      suggestedUserNames: [],
+      isSecuritySetup: false,
+      isRecoveryMode: false
     });
   },
   
@@ -288,6 +297,57 @@ Page({
   onConfirmPasswordInput(e) {
     this.setData({ confirmPassword: e.detail.value });
   },
+
+  onSecurityQuestionInput(e) {
+    this.setData({ securityQuestion: e.detail.value });
+  },
+
+  onSecurityAnswerInput(e) {
+    this.setData({ securityAnswer: e.detail.value });
+  },
+
+  switchToRecovery() {
+    this.setData({
+      isRegisterMode: false,
+      isSecuritySetup: false,
+      isRecoveryMode: true,
+      password: '',
+      confirmPassword: '',
+      securityAnswer: '',
+      recoveryQuestion: '',
+      showPassword: false,
+      showConfirmPassword: false,
+      statusText: '输入用户名后查询密保问题',
+      statusTextColor: 'blue'
+    });
+  },
+
+  async loadRecoveryQuestion() {
+    const userName = this.data.userName.trim();
+    if (!userName) {
+      wx.showToast({ title: '请输入用户名', icon: 'none' });
+      return;
+    }
+    wx.showLoading({ title: '查询中...' });
+    try {
+      const result = await db.getSecurityQuestion(userName);
+      if (!result.success) {
+        wx.showToast({ title: result.error || '查询失败', icon: 'none', duration: 2500 });
+        return;
+      }
+      this.setData({
+        recoveryQuestion: result.securityQuestion,
+        showPassword: true,
+        showConfirmPassword: true,
+        statusText: '请回答密保问题并设置新密码',
+        statusTextColor: 'green'
+      });
+    } catch (e) {
+      wx.showToast({ title: '查询失败，请重试', icon: 'none' });
+    } finally {
+      wx.hideLoading();
+    }
+  },
   
   togglePassword() {
     this.setData({
@@ -354,6 +414,19 @@ Page({
         
         // 更新全局数据
         app.globalData.currentUserName = userName;
+
+        if (result.needsSecuritySetup) {
+          this.setData({
+            isSecuritySetup: true,
+            isRecoveryMode: false,
+            securityQuestion: '',
+            securityAnswer: '',
+            statusText: '请先完善密保信息，之后可用于找回密码',
+            statusTextColor: 'orange'
+          });
+          wx.showToast({ title: '请完善密保信息', icon: 'none' });
+          return;
+        }
         
         wx.showToast({
           title: '登录成功',
@@ -423,6 +496,8 @@ Page({
     const userName = this.data.userName.trim();
     const password = this.data.password;
     const confirmPassword = this.data.confirmPassword;
+    const securityQuestion = this.data.securityQuestion.trim();
+    const securityAnswer = this.data.securityAnswer.trim();
     
     if (!userName) {
       wx.showToast({
@@ -475,12 +550,16 @@ Page({
         this.setData({ confirmPassword: '' });
         return;
       }
+      if (securityQuestion.length < 2 || securityAnswer.length < 2) {
+        wx.showToast({ title: '请设置密保问题和答案', icon: 'none' });
+        return;
+      }
       
       wx.showLoading({
         title: '注册中...'
       });
       
-      const result = await db.register(userName, password, confirmPassword);
+      const result = await db.register(userName, password, confirmPassword, securityQuestion, securityAnswer);
       wx.hideLoading();
       
       if (result.success) {
@@ -516,7 +595,54 @@ Page({
   },
   
   // 统一处理按钮点击（根据模式调用不同函数）
-  handleLoginOrRegister() {
+  async handleLoginOrRegister() {
+    if (this.data.isSecuritySetup) {
+      const question = this.data.securityQuestion.trim();
+      const answer = this.data.securityAnswer.trim();
+      if (question.length < 2 || answer.length < 2) {
+        wx.showToast({ title: '请设置密保问题和答案', icon: 'none' });
+        return;
+      }
+      wx.showLoading({ title: '保存中...' });
+      try {
+        const result = await db.setupSecurity(this.data.userName.trim(), this.data.password, question, answer);
+        if (!result.success) {
+          wx.showToast({ title: result.error || '保存失败', icon: 'none' });
+          return;
+        }
+        app.globalData.currentUserName = this.data.userName.trim();
+        wx.showToast({ title: '密保已保存', icon: 'success' });
+        setTimeout(() => wx.reLaunch({ url: '/pages/home/home' }), 1000);
+      } finally {
+        wx.hideLoading();
+      }
+      return;
+    }
+    if (this.data.isRecoveryMode) {
+      if (!this.data.recoveryQuestion) {
+        this.loadRecoveryQuestion();
+        return;
+      }
+      const answer = this.data.securityAnswer.trim();
+      if (!answer) {
+        wx.showToast({ title: '请输入密保答案', icon: 'none' });
+        return;
+      }
+      wx.showLoading({ title: '重置中...' });
+      try {
+        const result = await db.resetPassword(this.data.userName.trim(), answer, this.data.password, this.data.confirmPassword);
+        if (!result.success) {
+          wx.showToast({ title: result.error || '重置失败', icon: 'none' });
+          return;
+        }
+        app.globalData.currentUserName = this.data.userName.trim();
+        wx.showToast({ title: '密码已重置', icon: 'success' });
+        setTimeout(() => wx.reLaunch({ url: '/pages/home/home' }), 1000);
+      } finally {
+        wx.hideLoading();
+      }
+      return;
+    }
     if (this.data.isRegisterMode) {
       this.handleRegister();
     } else {

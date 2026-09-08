@@ -1,13 +1,13 @@
 <!--pages/login/login.wxml-->
 <view class="container">
   <view class="login-card">
-    <view class="title">AA 记账2.4.504</view>
+    <view class="title">AA 记账2.4.505</view>
     <view class="subtitle">题名登塔喜，醵宴为花忙</view>
     
     <view class="form">
       <view class="form-item">
         <text class="label">用户名：</text>
-        <input class="input" type="text" placeholder="输入你的名字，如：孙悟空" value="{{userName}}" bindinput="onUserNameInput" />
+        <input class="input" type="text" placeholder="输入你的名字，如：孙悟空" value="{{userName}}" bindinput="onUserNameInput" disabled="{{isSecuritySetup}}" />
         <view wx:if="{{isRegisterMode && userNameCheckText}}" class="username-check">
           <text class="username-check-text {{userNameChecking ? 'checking' : (userNameAvailable === true ? 'available' : (userNameAvailable === false ? 'occupied' : ''))}}">
             {{userNameCheckText}}
@@ -26,7 +26,7 @@
       </view>
       
       <view wx:if="{{showPassword}}" class="form-item">
-        <text class="label">密码：</text>
+        <text class="label">{{isRecoveryMode ? '新密码：' : '密码：'}}</text>
         <view class="password-wrapper">
           <input class="input" type="text" password="{{!showPasswordText}}" placeholder="请输入密码" value="{{password}}" bindinput="onPasswordInput" />
           <text class="toggle-password" bindtap="togglePassword">{{showPasswordText ? '隐藏' : '显示'}}</text>
@@ -34,8 +34,19 @@
       </view>
       
       <view wx:if="{{showConfirmPassword}}" class="form-item">
-        <text class="label">确认密码：</text>
+        <text class="label">确认{{isRecoveryMode ? '新' : ''}}密码：</text>
         <input class="input" type="password" placeholder="请再次输入密码" value="{{confirmPassword}}" bindinput="onConfirmPasswordInput" />
+      </view>
+
+      <view wx:if="{{(isRegisterMode || isSecuritySetup || (isRecoveryMode && recoveryQuestion))}}" class="form-item">
+        <text class="label">密保问题：</text>
+        <input wx:if="{{!isRecoveryMode}}" class="input" type="text" placeholder="例如：我的出生地是？" value="{{securityQuestion}}" bindinput="onSecurityQuestionInput" maxlength="60" />
+        <text wx:else class="security-question">{{recoveryQuestion}}</text>
+      </view>
+
+      <view wx:if="{{isRegisterMode || isSecuritySetup || (isRecoveryMode && recoveryQuestion)}}" class="form-item">
+        <text class="label">密保答案：</text>
+        <input class="input" type="text" password="true" placeholder="请输入密保答案" value="{{securityAnswer}}" bindinput="onSecurityAnswerInput" maxlength="60" />
       </view>
       
       <view class="form-item">
@@ -52,12 +63,18 @@
         </view>
       </checkbox-group>
       
-      <button class="btn btn-full" bindtap="handleLoginOrRegister" disabled="{{!hasAgreed}}">{{isRegisterMode ? '注册' : '登录'}}</button>
+      <button class="btn btn-full" bindtap="handleLoginOrRegister" disabled="{{!hasAgreed}}">{{isSecuritySetup ? '保存密保并进入' : (isRecoveryMode ? (recoveryQuestion ? '重置密码' : '查询密保问题') : (isRegisterMode ? '注册' : '登录'))}}</button>
       
-      <view class="form-item" style="margin-top: 20rpx; text-align: center;">
+      <view wx:if="{{!isSecuritySetup && !isRecoveryMode}}" class="form-item" style="margin-top: 20rpx; text-align: center;">
         <text class="link-text" bindtap="{{isRegisterMode ? 'switchToLogin' : 'switchToRegister'}}">
           {{isRegisterMode ? '已有账号？去登录' : '没有账号？去注册'}}
         </text>
+      </view>
+      <view wx:if="{{!isRegisterMode && !isSecuritySetup && !isRecoveryMode}}" class="form-item recovery-link-row">
+        <text class="link-text" bindtap="switchToRecovery">忘记密码？</text>
+      </view>
+      <view wx:if="{{isRecoveryMode}}" class="form-item recovery-link-row">
+        <text class="link-text" bindtap="switchToLogin">返回登录</text>
       </view>
     </view>
   </view>

@@ -59,8 +59,24 @@ function validateUserName(userName) {
   return '';
 }
 
+function normalizeSecurityAnswer(answer) {
+  return String(answer || '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function hashSecurityAnswer(answer) {
+  return hashPassword(`security-answer:${normalizeSecurityAnswer(answer)}`);
+}
+
+function validateSecurityInfo(question, answer) {
+  const safeQuestion = String(question || '').trim();
+  const safeAnswer = String(answer || '').trim();
+  if (safeQuestion.length < 2 || safeQuestion.length > 60) return '密保问题长度应为2至60个字符';
+  if (safeAnswer.length < 2 || safeAnswer.length > 60) return '密保答案长度应为2至60个字符';
+  return '';
+}
+
 exports.main = async (event, context) => {
-  const { action, userName, password, confirmPassword } = event;
+  const { action, userName, password, confirmPassword, securityQuestion, securityAnswer } = event;
   
   try {
     if (action === 'checkUser') {
@@ -72,8 +88,7 @@ exports.main = async (event, context) => {
       
       return {
         success: true,
-        userExists: userRes.data.length > 0,
-        user: userRes.data.length > 0 ? userRes.data[0] : null
+        userExists: userRes.data.length > 0
       };
     }
     
@@ -118,7 +133,8 @@ exports.main = async (event, context) => {
 
         return {
           success: true,
-          userName: userName
+          userName: userName,
+          needsSecuritySetup: !existingUser.securityQuestion || !existingUser.securityAnswerHash
         };
       } else {
         return {
@@ -168,6 +184,9 @@ exports.main = async (event, context) => {
           error: '两次输入的密码不一致'
         };
       }
+
+      const securityError = validateSecurityInfo(securityQuestion, securityAnswer);
+      if (securityError) return { success: false, error: securityError };
       
       // 创建新用户
       const hashedPassword = hashPassword(password);
@@ -175,6 +194,8 @@ exports.main = async (event, context) => {
         data: {
           name: userName,
           password: hashedPassword,
+          securityQuestion: String(securityQuestion).trim(),
+          securityAnswerHash: hashSecurityAnswer(securityAnswer),
           createdAt: new Date(),
           updatedAt: new Date(),
           lastLoginAt: new Date()
@@ -185,6 +206,49 @@ exports.main = async (event, context) => {
         success: true,
         userName: userName
       };
+    }
+
+    if (action === 'getSecurityQuestion') {
+      const userRes = await db.collection('users').where({ name: userName }).limit(1).get();
+      if (!userRes.data.length) return { success: false, error: '用户不存在' };
+      const user = userRes.data[0];
+      if (!user.securityQuestion || !user.securityAnswerHash) {
+        return { success: false, error: '该账号尚未设置密保，请联系管理员重置密码' };
+      }
+      return { success: true, securityQuestion: user.securityQuestion };
+    }
+
+    if (action === 'setupSecurity') {
+      const userRes = await db.collection('users').where({ name: userName }).limit(1).get();
+      if (!userRes.data.length) return { success: false, error: '用户不存在' };
+      const user = userRes.data[0];
+      if (!password || user.password !== hashPassword(password)) return { success: false, error: '登录凭据已失效，请重新登录' };
+      const securityError = validateSecurityInfo(securityQuestion, securityAnswer);
+      if (securityError) return { success: false, error: securityError };
+      await db.collection('users').doc(user._id).update({
+        data: {
+          securityQuestion: String(securityQuestion).trim(),
+          securityAnswerHash: hashSecurityAnswer(securityAnswer),
+          securityUpdatedAt: new Date(),
+          updatedAt: new Date()
+        }
+      });
+      return { success: true };
+    }
+
+    if (action === 'resetPassword') {
+      const userRes = await db.collection('users').where({ name: userName }).limit(1).get();
+      if (!userRes.data.length) return { success: false, error: '用户不存在' };
+      const user = userRes.data[0];
+      if (!user.securityAnswerHash || user.securityAnswerHash !== hashSecurityAnswer(securityAnswer)) {
+        return { success: false, error: '密保答案不正确' };
+      }
+      if (!password || password.length < 6) return { success: false, error: '密码长度至少6位' };
+      if (password !== confirmPassword) return { success: false, error: '两次输入的密码不一致' };
+      await db.collection('users').doc(user._id).update({
+        data: { password: hashPassword(password), passwordUpdatedAt: new Date(), updatedAt: new Date() }
+      });
+      return { success: true, userName };
     }
     
     return {

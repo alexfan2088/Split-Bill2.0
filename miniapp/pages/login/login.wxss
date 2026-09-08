@@ -152,6 +152,9 @@
   cursor: pointer;
 }
 
+.recovery-link-row { margin-top: -12rpx; text-align: center; }
+.security-question { display: block; padding: 18rpx 20rpx; background: #f6f8f7; border-radius: 8rpx; color: #333; font-size: 28rpx; line-height: 1.5; }
+
 .agreement-row {
   display: flex;
   align-items: flex-start;
