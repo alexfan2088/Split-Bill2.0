@@ -14,12 +14,24 @@ exports.main = async (event) => {
     // 同时避免在单次生成中处理过多页面、字体和附件图片。
     if (Array.isArray(mergeFileIDs) && mergeFileIDs.length > 0) {
       const mergedDoc = await PDFDocument.create();
-      for (const fileID of mergeFileIDs) {
-        const downloadRes = await cloud.downloadFile({ fileID });
-        const fileContent = downloadRes && downloadRes.fileContent;
-        if (!fileContent || !fileContent.length) {
-          throw new Error('PDF分卷下载失败');
+      // 云存储下载若逐个串行执行，分卷较多时仅网络等待就会超过函数时限。
+      // 限制为 6 路并发，缩短等待时间且避免一次占用过多内存。
+      const fileContents = new Array(mergeFileIDs.length);
+      let nextIndex = 0;
+      const downloadWorker = async () => {
+        while (nextIndex < mergeFileIDs.length) {
+          const index = nextIndex++;
+          const downloadRes = await cloud.downloadFile({ fileID: mergeFileIDs[index] });
+          const fileContent = downloadRes && downloadRes.fileContent;
+          if (!fileContent || !fileContent.length) {
+            throw new Error('PDF分卷下载失败');
+          }
+          fileContents[index] = fileContent;
         }
+      };
+      await Promise.all(Array.from({ length: Math.min(6, mergeFileIDs.length) }, downloadWorker));
+
+      for (const fileContent of fileContents) {
         const sourceDoc = await PDFDocument.load(fileContent);
         const copiedPages = await mergedDoc.copyPages(sourceDoc, sourceDoc.getPageIndices());
         copiedPages.forEach((page) => mergedDoc.addPage(page));
