@@ -1503,8 +1503,10 @@ Page({
     const result = [];
     let current = [];
     let weight = 0;
-    // 文字页限制为 20 页；一个图片附件按 6 页计，以控制云函数内存和耗时。
-    const maxWeight = 20;
+    // 真机端对单次 wx.cloud.callFunction 的轮询上限约为 15 秒。
+    // PDF 生成还需嵌入中文字体，20 个文字页在部分设备上会超过该上限；
+    // 因此按更小的负载分卷。附件仍独占一个分卷，最终再合成为一个 PDF。
+    const maxWeight = 4;
     (pages || []).forEach((page) => {
       const pageWeight = page && !Array.isArray(page) && page.type === 'attachment' ? 6 : 1;
       if (current.length > 0 && weight + pageWeight > maxWeight) {
