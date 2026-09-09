@@ -1263,7 +1263,7 @@ Page({
   onPdfReminderDownload() {
     this.setPdfReminderNextAt(0);
     this.setData({ showPdfReminderModal: false });
-    this.downloadActivityPdf();
+    this.downloadActivityCsv();
   },
 
   formatYymmdd(dateObj) {
@@ -1297,6 +1297,176 @@ Page({
     const trimmed = base.length > 60 ? base.slice(0, 60).trim() : base;
     if (!trimmed) return '活动信息.pdf';
     return trimmed.toLowerCase().endsWith('.pdf') ? trimmed : `${trimmed}.pdf`;
+  },
+
+  sanitizeCsvFileName(name) {
+    const base = String(name || '')
+      .replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, '')
+      .replace(/[\x00-\x1F\x7F]/g, '')
+      .replace(/[\\/:*?"<>|]/g, '_')
+      .replace(/[^\w\u4E00-\u9FFF·\-\.\s]/g, '_')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const trimmed = base.length > 60 ? base.slice(0, 60).trim() : base;
+    if (!trimmed) return '活动信息.csv';
+    return trimmed.toLowerCase().endsWith('.csv') ? trimmed : `${trimmed}.csv`;
+  },
+
+  escapeCsvCell(value) {
+    const text = value === undefined || value === null ? '' : String(value);
+    return `"${text.replace(/"/g, '""')}"`;
+  },
+
+  formatCsvAmount(amount) {
+    const value = Number(amount);
+    return Number.isFinite(value) ? value.toFixed(2) : '';
+  },
+
+  getCsvMemberNames(activity) {
+    return (activity && activity.members || [])
+      .map(member => typeof member === 'string' ? member : member && member.name)
+      .filter(Boolean)
+      .join('、');
+  },
+
+  getCsvDateRange(activity, bills) {
+    return (activity && activity.dateRange) || this.calculateDateRange(bills || []) || '';
+  },
+
+  getCsvKeyValue(value) {
+    if (!value || typeof value !== 'object') return '';
+    return Object.keys(value)
+      .filter(key => value[key] !== undefined && value[key] !== null && value[key] !== '')
+      .map(key => `${key}:${value[key]}`)
+      .join('; ');
+  },
+
+  getCsvAttachments(attachments) {
+    return (Array.isArray(attachments) ? attachments : [])
+      .map(item => typeof item === 'string' ? item : item && item.fileID)
+      .filter(Boolean)
+      .join('; ');
+  },
+
+  getCsvHeader() {
+    return ['记录类型', '一级活动', '一级活动起止时间', '二级活动', '二级活动起止时间', '活动类型', '预存活动', '保管人', '活动成员', '账单日期', '标题', '金额', '付款人', '显示付款人', '原付款人', '参与人权重', '分摊明细', '附件文件标识', '记录人', '备注', '记录ID'];
+  },
+
+  buildCsvSummaryRow(recordType, parent, child, bills, recharges) {
+    const billTotal = (bills || []).reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
+    const familyExpense = this.getFamilyExpense(child || parent || {}, billTotal);
+    const target = child || parent || {};
+    const parentRange = this.getCsvDateRange(parent, this.data.isParent
+      ? (this.data.pdfChildDetails || []).reduce((all, item) => all.concat(item.bills || []), [])
+      : bills);
+    const childRange = child ? this.getCsvDateRange(child, bills) : '';
+    const rechargeTotal = (recharges || []).reduce((sum, recharge) => sum + (Number(recharge.amount) || 0), 0);
+    const note = [
+      `账单数量：${(bills || []).length}`,
+      `账单总额：${this.formatCsvAmount(billTotal)}`,
+      `家庭支出：${this.formatCsvAmount(familyExpense)}`,
+      target.isPrepaid ? `充值总额：${this.formatCsvAmount(rechargeTotal)}` : ''
+    ].filter(Boolean).join('；');
+    return [recordType, parent.name || '', parentRange, child ? child.name || '' : '', childRange,
+      target.type || '', target.isPrepaid ? '是' : '否', target.keeper || '', this.getCsvMemberNames(target),
+      '', '', this.formatCsvAmount(familyExpense), '', '', '', '', '', '', target.creator || '', note, target._id || ''];
+  },
+
+  buildCsvBillRows(parent, child, bills) {
+    const parentRange = this.getCsvDateRange(parent, this.data.isParent
+      ? (this.data.pdfChildDetails || []).reduce((all, item) => all.concat(item.bills || []), [])
+      : bills);
+    const childRange = child ? this.getCsvDateRange(child, bills) : '';
+    return (bills || []).map(bill => [
+      '账单明细', parent.name || '', parentRange, child ? child.name || '' : '', childRange,
+      (child || parent).type || '', (child || parent).isPrepaid ? '是' : '否', (child || parent).keeper || '', this.getCsvMemberNames(child || parent),
+      this.formatBillDate(bill), bill.title || '', this.formatCsvAmount(bill.amount), bill.payer || '', bill.billshow || '', bill.originalPayer || '',
+      this.getCsvKeyValue(bill.participants), this.getCsvKeyValue(bill.splitDetail), this.getCsvAttachments(bill.attachments),
+      bill.recorder || bill.creator || '', bill.remark || bill.note || '', bill._id || ''
+    ]);
+  },
+
+  buildCsvRechargeRows(parent, child, recharges, relatedBills) {
+    const bills = relatedBills || (child ? [] : (this.data.rawBills || []));
+    const parentRange = this.getCsvDateRange(parent, this.data.isParent
+      ? (this.data.pdfChildDetails || []).reduce((all, item) => all.concat(item.bills || []), [])
+      : bills);
+    const childRange = child ? this.getCsvDateRange(child, bills) : '';
+    return (recharges || []).map(recharge => [
+      '充值明细', parent.name || '', parentRange, child ? child.name || '' : '', childRange,
+      (child || parent).type || '', (child || parent).isPrepaid ? '是' : '否', (child || parent).keeper || '', this.getCsvMemberNames(child || parent),
+      this.formatRechargeDate(recharge), recharge.title || '充值', this.formatCsvAmount(recharge.amount), recharge.payer || '', '', '', '', '',
+      this.getCsvAttachments(recharge.attachments), recharge.recorder || recharge.creator || '', recharge.remark || recharge.note || '', recharge._id || ''
+    ]);
+  },
+
+  buildActivityCsvRows() {
+    const activity = this.data.activity || {};
+    const bills = this.data.rawBills || [];
+    const recharges = this.data.rawRecharges || [];
+    return [
+      this.getCsvHeader(),
+      this.buildCsvSummaryRow('活动汇总', activity, null, bills, recharges),
+      ...this.buildCsvBillRows(activity, null, bills),
+      ...this.buildCsvRechargeRows(activity, null, recharges, bills)
+    ];
+  },
+
+  buildParentCsvRows() {
+    const parent = this.data.activity || {};
+    const children = this.data.pdfChildDetails || [];
+    const allBills = children.reduce((all, item) => all.concat(item.bills || []), []);
+    const rows = [this.getCsvHeader(), this.buildCsvSummaryRow('一级活动汇总', parent, null, allBills, [])];
+    children.forEach((item) => {
+      const child = item.activity || {};
+      const bills = item.bills || [];
+      const recharges = item.recharges || [];
+      rows.push(this.buildCsvSummaryRow('二级活动汇总', parent, child, bills, recharges));
+      rows.push(...this.buildCsvBillRows(parent, child, bills));
+      rows.push(...this.buildCsvRechargeRows(parent, child, recharges, bills));
+    });
+    return rows;
+  },
+
+  async saveCsvFile(content, fileName) {
+    const fs = wx.getFileSystemManager();
+    const safeName = this.sanitizeCsvFileName(fileName);
+    const filePath = `${wx.env.USER_DATA_PATH}/${safeName}`;
+    await new Promise((resolve, reject) => {
+      fs.writeFile({ filePath, data: `\uFEFF${content}`, encoding: 'utf8', success: resolve, fail: reject });
+    });
+    return filePath;
+  },
+
+  async downloadActivityCsv() {
+    if (!this.data.activity) {
+      wx.showToast({ title: '活动数据未加载', icon: 'none' });
+      return;
+    }
+    const now = new Date();
+    const activityName = this.normalizeAsciiDigits(this.data.activity.name || '活动');
+    const fileName = this.sanitizeCsvFileName(`${activityName}-${this.formatYymmdd(now)}${this.formatHhmmss(now)}.csv`);
+    wx.showLoading({ title: '正在导出CSV...', mask: true });
+    try {
+      const rows = this.data.isParent ? this.buildParentCsvRows() : this.buildActivityCsvRows();
+      const content = rows.map(row => row.map(value => this.escapeCsvCell(value)).join(',')).join('\r\n');
+      const filePath = await this.saveCsvFile(content, fileName);
+      this.setLastPdfDownloadAt(Date.now());
+      wx.hideLoading();
+      wx.openDocument({
+        filePath,
+        fileType: 'csv',
+        showMenu: true,
+        fail: (error) => {
+          console.error('打开CSV失败:', error);
+          wx.showToast({ title: 'CSV已保存，请在文件管理中打开', icon: 'none', duration: 3000 });
+        }
+      });
+    } catch (error) {
+      console.error('导出CSV失败:', error);
+      wx.hideLoading();
+      wx.showToast({ title: error.message || '导出CSV失败', icon: 'none', duration: 3000 });
+    }
   },
 
   async downloadActivityPdf() {

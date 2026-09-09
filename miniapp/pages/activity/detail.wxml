@@ -25,7 +25,7 @@
           <text class="summary-value amount">¥{{total}}</text>
         </view>
         <view class="summary-actions">
-          <button class="btn-download-activity" size="mini" bindtap="downloadActivityPdf">下载</button>
+          <button class="btn-download-activity" size="mini" bindtap="downloadActivityCsv">导出CSV</button>
           <button wx:if="{{isCreator}}" class="btn-delete-activity" size="mini" bindtap="deleteActivity">删除</button>
         </view>
       </view>
@@ -246,11 +246,11 @@
       </view>
     </view>
 
-    <!-- PDF 下载提醒弹层 -->
+    <!-- CSV 下载提醒弹层 -->
     <view wx:if="{{showPdfReminderModal}}" class="pdf-modal-mask" catchtouchmove="noop">
       <view class="pdf-reminder-modal">
         <view class="pdf-modal-title">下载提醒</view>
-        <view class="pdf-modal-content">已{{pdfReminderDiffDays}}天未下载活动信息，是否现在下载？</view>
+        <view class="pdf-modal-content">已{{pdfReminderDiffDays}}天未导出活动信息，是否现在导出 CSV？</view>
         <view class="pdf-reminder-actions">
           <button class="pdf-reminder-btn ghost" bindtap="onPdfReminderNever">永不提醒</button>
           <button class="pdf-reminder-btn ghost" bindtap="onPdfReminderLater">30天后提醒</button>
@@ -259,7 +259,7 @@
       </view>
     </view>
 
-    <!-- PDF 保存指引弹层 -->
+    <!-- 保留旧版 PDF 保存指引弹层，CSV 导出会直接打开文件 -->
     <view wx:if="{{showPdfGuideModal}}" class="pdf-modal-mask" catchtouchmove="noop">
       <view class="pdf-modal">
         <view class="pdf-modal-title">PDF已生成</view>
