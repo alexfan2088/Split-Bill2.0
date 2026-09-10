@@ -1348,82 +1348,146 @@ Page({
       .join('; ');
   },
 
-  getCsvHeader() {
-    return ['记录类型', '一级活动', '一级活动起止时间', '二级活动', '二级活动起止时间', '活动类型', '预存活动', '保管人', '活动成员', '账单日期', '标题', '金额', '付款人', '显示付款人', '原付款人', '参与人权重', '分摊明细', '附件文件标识', '记录人', '备注', '记录ID'];
+  getCsvParticipants(activity, bill) {
+    const memberNames = new Set((activity.members || [])
+      .map(member => typeof member === 'string' ? member : member && member.name)
+      .filter(Boolean));
+    return Object.keys(bill.participants || {})
+      .filter(name => Number(bill.participants[name]) > 0 && memberNames.has(name))
+      .join('、');
   },
 
-  buildCsvSummaryRow(recordType, parent, child, bills, recharges) {
-    const billTotal = (bills || []).reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
-    const familyExpense = this.getFamilyExpense(child || parent || {}, billTotal);
-    const target = child || parent || {};
-    const parentRange = this.getCsvDateRange(parent, this.data.isParent
-      ? (this.data.pdfChildDetails || []).reduce((all, item) => all.concat(item.bills || []), [])
-      : bills);
-    const childRange = child ? this.getCsvDateRange(child, bills) : '';
-    const rechargeTotal = (recharges || []).reduce((sum, recharge) => sum + (Number(recharge.amount) || 0), 0);
-    const note = [
-      `账单数量：${(bills || []).length}`,
-      `账单总额：${this.formatCsvAmount(billTotal)}`,
-      `家庭支出：${this.formatCsvAmount(familyExpense)}`,
-      target.isPrepaid ? `充值总额：${this.formatCsvAmount(rechargeTotal)}` : ''
-    ].filter(Boolean).join('；');
-    return [recordType, parent.name || '', parentRange, child ? child.name || '' : '', childRange,
-      target.type || '', target.isPrepaid ? '是' : '否', target.keeper || '', this.getCsvMemberNames(target),
-      '', '', this.formatCsvAmount(familyExpense), '', '', '', '', '', '', target.creator || '', note, target._id || ''];
+  getCsvAverage(activity, bills) {
+    const total = (bills || []).reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
+    const latestBill = (bills || [])[0] || {};
+    let totalWeight = Object.keys(latestBill.participants || {})
+      .reduce((sum, name) => sum + Math.max(0, Number(latestBill.participants[name]) || 0), 0);
+    if (!totalWeight) {
+      totalWeight = (activity.members || []).reduce((sum, member) => {
+        return sum + (Number(typeof member === 'string' ? 2 : member.weight) || 2);
+      }, 0) || 1;
+    }
+    return total / totalWeight;
   },
 
-  buildCsvBillRows(parent, child, bills) {
-    const parentRange = this.getCsvDateRange(parent, this.data.isParent
-      ? (this.data.pdfChildDetails || []).reduce((all, item) => all.concat(item.bills || []), [])
-      : bills);
-    const childRange = child ? this.getCsvDateRange(child, bills) : '';
-    return (bills || []).map(bill => [
-      '账单明细', parent.name || '', parentRange, child ? child.name || '' : '', childRange,
-      (child || parent).type || '', (child || parent).isPrepaid ? '是' : '否', (child || parent).keeper || '', this.getCsvMemberNames(child || parent),
-      this.formatBillDate(bill), bill.title || '', this.formatCsvAmount(bill.amount), bill.payer || '', bill.billshow || '', bill.originalPayer || '',
-      this.getCsvKeyValue(bill.participants), this.getCsvKeyValue(bill.splitDetail), this.getCsvAttachments(bill.attachments),
-      bill.recorder || bill.creator || '', bill.remark || bill.note || '', bill._id || ''
-    ]);
-  },
+  buildCsvActivitySection(activity, bills, recharges) {
+    const sourceBills = bills || [];
+    const sourceRecharges = recharges || [];
+    const billTotal = sourceBills.reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
+    const dateRange = this.getCsvDateRange(activity, sourceBills) || '至今';
+    const familyExpense = this.getFamilyExpense(activity, billTotal);
+    const balances = this.calcBalances(activity.members || [], sourceBills, sourceRecharges, activity.isPrepaid ? activity.keeper : '');
+    const rows = [
+      ['活动信息'],
+      ['项目', '内容'],
+      ['活动名称', activity.name || '未命名活动'],
+      ['活动类型', activity.type || '未设置'],
+      ['创建者', activity.creator || '未设置'],
+      ['成员', this.getCsvMemberNames(activity) || '无'],
+      ['活动属性', activity.isPrepaid ? `预存活动（保管人：${activity.keeper || '未设置'}）` : '非预存活动'],
+      ['家庭支出', `¥${this.formatAmount(familyExpense)}`],
+      ['账单范围', `${dateRange}，账单数量：${sourceBills.length} 条`],
+      ['导出时间', this.formatExportTime(new Date())],
+      [],
+      ['账单信息'],
+      ['日期', '名称', '付款人', '参与人', '金额']
+    ];
 
-  buildCsvRechargeRows(parent, child, recharges, relatedBills) {
-    const bills = relatedBills || (child ? [] : (this.data.rawBills || []));
-    const parentRange = this.getCsvDateRange(parent, this.data.isParent
-      ? (this.data.pdfChildDetails || []).reduce((all, item) => all.concat(item.bills || []), [])
-      : bills);
-    const childRange = child ? this.getCsvDateRange(child, bills) : '';
-    return (recharges || []).map(recharge => [
-      '充值明细', parent.name || '', parentRange, child ? child.name || '' : '', childRange,
-      (child || parent).type || '', (child || parent).isPrepaid ? '是' : '否', (child || parent).keeper || '', this.getCsvMemberNames(child || parent),
-      this.formatRechargeDate(recharge), recharge.title || '充值', this.formatCsvAmount(recharge.amount), recharge.payer || '', '', '', '', '',
-      this.getCsvAttachments(recharge.attachments), recharge.recorder || recharge.creator || '', recharge.remark || recharge.note || '', recharge._id || ''
-    ]);
+    if (sourceBills.length === 0) {
+      rows.push(['暂无账单记录']);
+    } else {
+      sourceBills.forEach((bill) => {
+        rows.push([
+          this.formatBillDate(bill),
+          bill.title || '未命名',
+          (bill.billshow || bill.payer) || '',
+          this.getCsvParticipants(activity, bill),
+          `¥${this.formatAmount(bill.amount || 0)}`
+        ]);
+      });
+    }
+
+    rows.push([], ['结算信息'], ['成员', '实付', '应付', '余额']);
+    const memberNames = (activity.members || [])
+      .map(member => typeof member === 'string' ? member : member && member.name)
+      .filter(Boolean);
+    if (memberNames.length === 0) {
+      rows.push(['暂无成员']);
+    } else {
+      memberNames.forEach((name) => {
+        const balance = balances[name] || { paid: 0, shouldPay: 0, balance: 0 };
+        rows.push([name, `¥${this.formatAmount(balance.paid)}`, `¥${this.formatAmount(balance.shouldPay)}`, `¥${this.formatAmount(balance.balance)}`]);
+      });
+      rows.push(['总支出 / 人均', `¥${this.formatAmount(billTotal)} / ¥${this.formatAmount(this.getCsvAverage(activity, sourceBills))}`]);
+    }
+
+    if (sourceRecharges.length > 0) {
+      rows.push([], ['预存记录'], ['日期', '充值人', '金额', '记录人', '备注']);
+      sourceRecharges.forEach((recharge) => {
+        rows.push([
+          this.formatRechargeDate(recharge), recharge.payer || '', `¥${this.formatAmount(recharge.amount || 0)}`,
+          recharge.recorder || recharge.creator || '', recharge.remark || recharge.note || ''
+        ]);
+      });
+    }
+
+    const attachmentRows = [];
+    sourceBills.forEach((bill) => {
+      (Array.isArray(bill.attachments) ? bill.attachments : []).forEach((item) => {
+        const fileID = typeof item === 'string' ? item : item && item.fileID;
+        if (fileID) attachmentRows.push([bill.title || '未命名', this.formatBillDate(bill), `¥${this.formatAmount(bill.amount || 0)}`, (bill.billshow || bill.payer) || '', fileID]);
+      });
+    });
+    if (attachmentRows.length > 0) {
+      rows.push([], ['附件信息'], ['账单名称', '账单日期', '账单金额', '付款人', '附件文件标识'], ...attachmentRows);
+    }
+    return rows;
   },
 
   buildActivityCsvRows() {
-    const activity = this.data.activity || {};
-    const bills = this.data.rawBills || [];
-    const recharges = this.data.rawRecharges || [];
-    return [
-      this.getCsvHeader(),
-      this.buildCsvSummaryRow('活动汇总', activity, null, bills, recharges),
-      ...this.buildCsvBillRows(activity, null, bills),
-      ...this.buildCsvRechargeRows(activity, null, recharges, bills)
-    ];
+    return this.buildCsvActivitySection(this.data.activity || {}, this.data.rawBills || [], this.data.rawRecharges || []);
   },
 
   buildParentCsvRows() {
     const parent = this.data.activity || {};
     const children = this.data.pdfChildDetails || [];
     const allBills = children.reduce((all, item) => all.concat(item.bills || []), []);
-    const rows = [this.getCsvHeader(), this.buildCsvSummaryRow('一级活动汇总', parent, null, allBills, [])];
-    children.forEach((item) => {
-      const child = item.activity || {};
+    const total = children.reduce((sum, item) => {
       const bills = item.bills || [];
-      const recharges = item.recharges || [];
-      rows.push(this.buildCsvSummaryRow('二级活动汇总', parent, child, bills, recharges));
-      rows.push(...this.buildCsvBillRows(parent, child, bills));
-      rows.push(...this.buildCsvRechargeRows(parent, child, recharges, bills));
+      const billTotal = bills.reduce((childSum, bill) => childSum + (Number(bill.amount) || 0), 0);
+      return sum + this.getFamilyExpense(item.activity || {}, billTotal);
+    }, 0);
+    const rows = [
+      ['一级活动信息'],
+      ['项目', '内容'],
+      ['一级活动名称', parent.name || '未命名一级活动'],
+      ['创建者', parent.creator || '未设置'],
+      ['活动属性', '一级活动'],
+      ['总支出', `¥${this.formatAmount(total)}`],
+      ['起止日期', this.getCsvDateRange(parent, allBills) || '至今'],
+      ['包含二级活动', `${children.length} 个`],
+      ['导出时间', this.formatExportTime(new Date())],
+      [],
+      ['二级活动清单'],
+      ['序号', '二级活动名称', '创建者', '参与成员', '家庭支出', '起止时间']
+    ];
+    if (children.length === 0) {
+      rows.push(['暂无二级活动']);
+    } else {
+      children.forEach((item, index) => {
+        const child = item.activity || {};
+        const bills = item.bills || [];
+        const billTotal = bills.reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
+        rows.push([
+          index + 1, child.name || '未命名活动', child.creator || '未设置', this.getCsvMemberNames(child) || '无',
+          `¥${this.formatAmount(this.getFamilyExpense(child, billTotal))}`, this.getCsvDateRange(child, bills) || '至今'
+        ]);
+      });
+    }
+    children.forEach((item, index) => {
+      const child = item.activity || {};
+      rows.push([], [`二级活动 ${index + 1}/${children.length}：${child.name || '未命名活动'}`], []);
+      rows.push(...this.buildCsvActivitySection(child, item.bills || [], item.recharges || []));
     });
     return rows;
   },
