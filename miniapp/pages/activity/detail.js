@@ -1,6 +1,7 @@
 // pages/activity/detail.js
 const db = require('../../utils/db.js');
 const settlement = require('../../utils/settlement.js');
+const XLSX = require('../../miniprogram_npm/xlsx-js-style/index.js');
 const app = getApp();
 
 Page({
@@ -1263,7 +1264,7 @@ Page({
   onPdfReminderDownload() {
     this.setPdfReminderNextAt(0);
     this.setData({ showPdfReminderModal: false });
-    this.downloadActivityCsv();
+    this.downloadActivityXlsx();
   },
 
   formatYymmdd(dateObj) {
@@ -1310,6 +1311,19 @@ Page({
     const trimmed = base.length > 60 ? base.slice(0, 60).trim() : base;
     if (!trimmed) return '活动信息.csv';
     return trimmed.toLowerCase().endsWith('.csv') ? trimmed : `${trimmed}.csv`;
+  },
+
+  sanitizeXlsxFileName(name) {
+    const base = String(name || '')
+      .replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, '')
+      .replace(/[\x00-\x1F\x7F]/g, '')
+      .replace(/[\\/:*?"<>|]/g, '_')
+      .replace(/[^\w\u4E00-\u9FFF·\-\.\s]/g, '_')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const trimmed = base.length > 60 ? base.slice(0, 60).trim() : base;
+    if (!trimmed) return '活动信息.xlsx';
+    return trimmed.toLowerCase().endsWith('.xlsx') ? trimmed : `${trimmed}.xlsx`;
   },
 
   escapeCsvCell(value) {
@@ -1504,6 +1518,122 @@ Page({
       await new Promise(resolve => setTimeout(resolve, 45));
     }
     return lines.join('\r\n');
+  },
+
+  isXlsxSectionTitle(row) {
+    const value = row && row[0];
+    return Array.isArray(row) && row.length === 1 && typeof value === 'string' && (
+      value === '活动信息' || value === '结算信息' || value === '账单信息' || value === '预存记录' ||
+      value === '一级活动信息' || value === '二级活动清单' || value.indexOf('二级活动 ') === 0
+    );
+  },
+
+  isXlsxTableHeader(row) {
+    return Array.isArray(row) && ['项目', '成员', '日期', '序号'].includes(row[0]);
+  },
+
+  async buildXlsxFileData(rows, updateProgress) {
+    const sourceRows = rows || [];
+    const total = Math.max(sourceRows.length, 1);
+    const maxColumns = Math.max(1, ...sourceRows.map(row => Array.isArray(row) ? row.length : 0));
+    const chunkSize = Math.max(10, Math.ceil(total / 12));
+    const sheet = {};
+    const titleStyle = {
+      font: { name: 'Microsoft YaHei', sz: 14, bold: true, color: { rgb: '1D4ED8' } },
+      fill: { patternType: 'solid', fgColor: { rgb: 'EAF2FF' } },
+      alignment: { vertical: 'center', wrapText: true }
+    };
+    const headerStyle = {
+      font: { name: 'Microsoft YaHei', sz: 11, bold: true, color: { rgb: '1D4ED8' } },
+      fill: { patternType: 'solid', fgColor: { rgb: 'F3F7FF' } },
+      alignment: { vertical: 'center', wrapText: true },
+      border: { bottom: { style: 'thin', color: { rgb: 'BFD3F2' } } }
+    };
+    const bodyStyle = { font: { name: 'Microsoft YaHei', sz: 10 }, alignment: { vertical: 'center', wrapText: true } };
+    const merges = [];
+    const rowSettings = [];
+
+    for (let start = 0; start < sourceRows.length; start += chunkSize) {
+      const chunk = sourceRows.slice(start, start + chunkSize);
+      chunk.forEach((row, offset) => {
+        const rowIndex = start + offset;
+        const values = Array.isArray(row) ? row : [row];
+        const isTitle = this.isXlsxSectionTitle(values);
+        const isHeader = this.isXlsxTableHeader(values);
+        if (isTitle) {
+          merges.push({ s: { r: rowIndex, c: 0 }, e: { r: rowIndex, c: maxColumns - 1 } });
+          rowSettings[rowIndex] = { hpt: 24 };
+        }
+        values.forEach((value, columnIndex) => {
+          if (value === undefined || value === null || value === '') return;
+          const address = XLSX.utils.encode_cell({ r: rowIndex, c: columnIndex });
+          sheet[address] = {
+            t: typeof value === 'number' ? 'n' : 's',
+            v: value,
+            s: isTitle ? titleStyle : (isHeader ? headerStyle : bodyStyle)
+          };
+        });
+      });
+      const completed = Math.min(start + chunk.length, total);
+      updateProgress(Math.min(88, 8 + Math.floor(completed / total * 80)));
+      // 让真机渲染每一个批次的实际处理进度。
+      await new Promise(resolve => setTimeout(resolve, 45));
+    }
+
+    sheet['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(0, sourceRows.length - 1), c: maxColumns - 1 } });
+    sheet['!merges'] = merges;
+    sheet['!rows'] = rowSettings;
+    sheet['!cols'] = [
+      { wch: 18 }, { wch: 30 }, { wch: 18 }, { wch: 24 }, { wch: 16 }, { wch: 18 }
+    ].slice(0, maxColumns);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, sheet, this.data.isParent ? '父活动导出' : '活动导出');
+    return XLSX.write(workbook, { bookType: 'xlsx', type: 'array', compression: true });
+  },
+
+  async saveXlsxFile(data, fileName) {
+    const fs = wx.getFileSystemManager();
+    const safeName = this.sanitizeXlsxFileName(fileName);
+    const filePath = `${wx.env.USER_DATA_PATH}/${safeName}`;
+    await new Promise((resolve, reject) => {
+      fs.writeFile({ filePath, data, success: resolve, fail: reject });
+    });
+    return filePath;
+  },
+
+  async downloadActivityXlsx() {
+    if (!this.data.activity) {
+      wx.showToast({ title: '活动数据未加载', icon: 'none' });
+      return;
+    }
+    const now = new Date();
+    const activityName = this.normalizeAsciiDigits(this.data.activity.name || '活动');
+    const fileName = this.sanitizeXlsxFileName(`${activityName}-${this.formatYymmdd(now)}${this.formatHhmmss(now)}.xlsx`);
+    const showProgress = (title, progress) => {
+      wx.showLoading({ title: `${title} ${progress}%`, mask: true });
+    };
+    showProgress('正在生成XLSX...', 5);
+    try {
+      const rows = this.data.isParent ? this.buildParentCsvRows() : this.buildActivityCsvRows();
+      const fileData = await this.buildXlsxFileData(rows, progress => showProgress('正在生成XLSX...', progress));
+      showProgress('正在保存XLSX...', 92);
+      const filePath = await this.saveXlsxFile(fileData, fileName);
+      this.setLastPdfDownloadAt(Date.now());
+      wx.hideLoading();
+      wx.openDocument({
+        filePath,
+        fileType: 'xlsx',
+        showMenu: true,
+        fail: (error) => {
+          console.error('打开XLSX失败:', error);
+          wx.showToast({ title: 'XLSX已保存，请在文件管理中打开', icon: 'none', duration: 3000 });
+        }
+      });
+    } catch (error) {
+      console.error('导出XLSX失败:', error);
+      wx.hideLoading();
+      wx.showToast({ title: error.message || '导出XLSX失败', icon: 'none', duration: 3000 });
+    }
   },
 
   async downloadActivityCsv() {
