@@ -1438,6 +1438,22 @@ Page({
     return filePath;
   },
 
+  async buildCsvContentWithProgress(rows, updateProgress) {
+    const sourceRows = rows || [];
+    const total = Math.max(sourceRows.length, 1);
+    const chunkSize = Math.max(10, Math.ceil(total / 12));
+    const lines = [];
+    for (let start = 0; start < sourceRows.length; start += chunkSize) {
+      const chunk = sourceRows.slice(start, start + chunkSize);
+      lines.push(...chunk.map(row => row.map(value => this.escapeCsvCell(value)).join(',')));
+      const completed = Math.min(start + chunk.length, total);
+      updateProgress(Math.min(88, 8 + Math.floor(completed / total * 80)));
+      // 主动让出一次渲染机会，真机上能看到平滑且与行数对应的实际进度。
+      await new Promise(resolve => setTimeout(resolve, 45));
+    }
+    return lines.join('\r\n');
+  },
+
   async downloadActivityCsv() {
     if (!this.data.activity) {
       wx.showToast({ title: '活动数据未加载', icon: 'none' });
@@ -1446,12 +1462,17 @@ Page({
     const now = new Date();
     const activityName = this.normalizeAsciiDigits(this.data.activity.name || '活动');
     const fileName = this.sanitizeCsvFileName(`${activityName}-${this.formatYymmdd(now)}${this.formatHhmmss(now)}.csv`);
-    wx.showLoading({ title: '正在导出CSV...', mask: true });
+    const showProgress = (title, progress) => {
+      wx.showLoading({ title: `${title} ${progress}%`, mask: true });
+    };
+    showProgress('正在整理CSV...', 5);
     try {
       const rows = this.data.isParent ? this.buildParentCsvRows() : this.buildActivityCsvRows();
-      const content = rows.map(row => row.map(value => this.escapeCsvCell(value)).join(',')).join('\r\n');
+      const content = await this.buildCsvContentWithProgress(rows, progress => showProgress('正在整理CSV...', progress));
+      showProgress('正在保存CSV...', 92);
       const filePath = await this.saveCsvFile(content, fileName);
       this.setLastPdfDownloadAt(Date.now());
+      showProgress('正在打开CSV...', 100);
       wx.hideLoading();
       wx.openDocument({
         filePath,
