@@ -1387,25 +1387,8 @@ Page({
       ['活动属性', activity.isPrepaid ? `预存活动（保管人：${activity.keeper || '未设置'}）` : '非预存活动'],
       ['家庭支出', `¥${this.formatAmount(familyExpense)}`],
       ['账单范围', `${dateRange}，账单数量：${sourceBills.length} 条`],
-      ['导出时间', this.formatExportTime(new Date())],
-      [],
-      ['账单信息'],
-      ['日期', '名称', '付款人', '参与人', '金额']
+      ['导出时间', this.formatExportTime(new Date())]
     ];
-
-    if (sourceBills.length === 0) {
-      rows.push(['暂无账单记录']);
-    } else {
-      sourceBills.forEach((bill) => {
-        rows.push([
-          this.formatBillDate(bill),
-          bill.title || '未命名',
-          (bill.billshow || bill.payer) || '',
-          this.getCsvParticipants(activity, bill),
-          `¥${this.formatAmount(bill.amount || 0)}`
-        ]);
-      });
-    }
 
     rows.push([], ['结算信息'], ['成员', '实付', '应付', '余额']);
     const memberNames = (activity.members || [])
@@ -1421,6 +1404,21 @@ Page({
       rows.push(['总支出 / 人均', `¥${this.formatAmount(billTotal)} / ¥${this.formatAmount(this.getCsvAverage(activity, sourceBills))}`]);
     }
 
+    rows.push([], ['账单信息'], ['日期', '名称', '付款人', '参与人', '金额']);
+    if (sourceBills.length === 0) {
+      rows.push(['暂无账单记录']);
+    } else {
+      sourceBills.forEach((bill) => {
+        rows.push([
+          this.formatBillDate(bill),
+          bill.title || '未命名',
+          (bill.billshow || bill.payer) || '',
+          this.getCsvParticipants(activity, bill),
+          `¥${this.formatAmount(bill.amount || 0)}`
+        ]);
+      });
+    }
+
     if (sourceRecharges.length > 0) {
       rows.push([], ['预存记录'], ['日期', '充值人', '金额', '记录人', '备注']);
       sourceRecharges.forEach((recharge) => {
@@ -1431,16 +1429,6 @@ Page({
       });
     }
 
-    const attachmentRows = [];
-    sourceBills.forEach((bill) => {
-      (Array.isArray(bill.attachments) ? bill.attachments : []).forEach((item) => {
-        const fileID = typeof item === 'string' ? item : item && item.fileID;
-        if (fileID) attachmentRows.push([bill.title || '未命名', this.formatBillDate(bill), `¥${this.formatAmount(bill.amount || 0)}`, (bill.billshow || bill.payer) || '', fileID]);
-      });
-    });
-    if (attachmentRows.length > 0) {
-      rows.push([], ['附件信息'], ['账单名称', '账单日期', '账单金额', '付款人', '附件文件标识'], ...attachmentRows);
-    }
     return rows;
   },
 
