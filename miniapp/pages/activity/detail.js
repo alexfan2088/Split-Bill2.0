@@ -1538,18 +1538,29 @@ Page({
     const maxColumns = Math.max(1, ...sourceRows.map(row => Array.isArray(row) ? row.length : 0));
     const chunkSize = Math.max(10, Math.ceil(total / 12));
     const sheet = {};
+    const cellBorder = {
+      top: { style: 'thin', color: { rgb: 'D9E2F3' } },
+      bottom: { style: 'thin', color: { rgb: 'D9E2F3' } },
+      left: { style: 'thin', color: { rgb: 'D9E2F3' } },
+      right: { style: 'thin', color: { rgb: 'D9E2F3' } }
+    };
     const titleStyle = {
       font: { name: 'Microsoft YaHei', sz: 14, bold: true, color: { rgb: '1D4ED8' } },
       fill: { patternType: 'solid', fgColor: { rgb: 'EAF2FF' } },
-      alignment: { vertical: 'center', wrapText: true }
+      alignment: { vertical: 'center', wrapText: true },
+      border: cellBorder
     };
     const headerStyle = {
       font: { name: 'Microsoft YaHei', sz: 11, bold: true, color: { rgb: '1D4ED8' } },
       fill: { patternType: 'solid', fgColor: { rgb: 'F3F7FF' } },
       alignment: { vertical: 'center', wrapText: true },
-      border: { bottom: { style: 'thin', color: { rgb: 'BFD3F2' } } }
+      border: cellBorder
     };
-    const bodyStyle = { font: { name: 'Microsoft YaHei', sz: 10 }, alignment: { vertical: 'center', wrapText: true } };
+    const bodyStyle = {
+      font: { name: 'Microsoft YaHei', sz: 10 },
+      alignment: { vertical: 'center', wrapText: true },
+      border: cellBorder
+    };
     const merges = [];
     const rowSettings = [];
 
@@ -1583,12 +1594,37 @@ Page({
     sheet['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(0, sourceRows.length - 1), c: maxColumns - 1 } });
     sheet['!merges'] = merges;
     sheet['!rows'] = rowSettings;
-    sheet['!cols'] = [
-      { wch: 18 }, { wch: 30 }, { wch: 18 }, { wch: 24 }, { wch: 16 }, { wch: 18 }
-    ].slice(0, maxColumns);
+    sheet['!cols'] = Array.from({ length: maxColumns }, () => ({ wch: 9 }));
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, sheet, this.data.isParent ? '父活动导出' : '活动导出');
     return XLSX.write(workbook, { bookType: 'xlsx', type: 'array', compression: true });
+  },
+
+  disableXlsxGridlines(fileData) {
+    try {
+      const archive = XLSX.CFB.read(new Uint8Array(fileData), { type: 'buffer' });
+      const sheetXml = XLSX.CFB.find(archive, '/xl/worksheets/sheet1.xml');
+      if (!sheetXml || !sheetXml.content) return fileData;
+      const xml = typeof TextDecoder !== 'undefined'
+        ? new TextDecoder().decode(sheetXml.content)
+        : Array.prototype.map.call(sheetXml.content, byte => String.fromCharCode(byte)).join('');
+      const updatedXml = xml.replace(/<sheetView\b([^>]*?)(\/?)>/, (match, attributes, closing) => {
+        if (/showGridLines=/.test(attributes)) return match;
+        return `<sheetView${attributes} showGridLines="0"${closing}>`;
+      });
+      if (updatedXml === xml) return fileData;
+      const bytes = typeof TextEncoder !== 'undefined'
+        ? new TextEncoder().encode(updatedXml)
+        : Uint8Array.from(updatedXml, char => char.charCodeAt(0));
+      sheetXml.content = bytes;
+      sheetXml.size = bytes.length;
+      const output = XLSX.CFB.write(archive, { type: 'array', fileType: 'zip', compression: true });
+      if (output instanceof ArrayBuffer) return output;
+      return output.buffer.slice(output.byteOffset || 0, (output.byteOffset || 0) + output.byteLength);
+    } catch (error) {
+      console.warn('隐藏XLSX网格线失败，仍将导出文件:', error);
+      return fileData;
+    }
   },
 
   async saveXlsxFile(data, fileName) {
@@ -1615,7 +1651,8 @@ Page({
     showProgress('正在生成XLSX...', 5);
     try {
       const rows = this.data.isParent ? this.buildParentCsvRows() : this.buildActivityCsvRows();
-      const fileData = await this.buildXlsxFileData(rows, progress => showProgress('正在生成XLSX...', progress));
+      let fileData = await this.buildXlsxFileData(rows, progress => showProgress('正在生成XLSX...', progress));
+      fileData = this.disableXlsxGridlines(fileData);
       showProgress('正在保存XLSX...', 92);
       const filePath = await this.saveXlsxFile(fileData, fileName);
       this.setLastPdfDownloadAt(Date.now());
