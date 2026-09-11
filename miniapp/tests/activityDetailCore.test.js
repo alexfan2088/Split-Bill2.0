@@ -72,7 +72,7 @@ async function run() {
     recharges: []
   });
   const parentDenied = await getActivityDetail(parentDb, parentId, 'member');
-  assert.deepStrictEqual(parentDenied, { success: false, error: '仅父活动创建者可查看父活动' });
+  assert.deepStrictEqual(parentDenied, { success: false, error: '仅一级活动创建者可查看一级活动' });
   console.log('ok - activity detail aggregates paged records and enforces membership');
 }
 

@@ -57,8 +57,8 @@ Page({
         .map(activity => activity.parentId))];
       const parentCreatorById = {};
 
-      // 父活动创建者在首页看到父活动；其他成员仅看到自己参与的二级活动。
-      // 查询结果仅用于判断展示权限，父活动名称和成员不会传入二级活动卡片。
+      // 一级活动创建者在首页看到一级活动；其他成员仅看到自己参与的二级活动。
+      // 查询结果仅用于判断展示权限，一级活动名称和成员不会传入二级活动卡片。
       for (let i = 0; i < childParentIds.length; i += 20) {
         const ids = childParentIds.slice(i, i + 20);
         try {
@@ -69,7 +69,7 @@ Page({
             parentCreatorById[parent._id] = parent.creator;
           });
         } catch (e) {
-          console.error('加载二级活动所属父活动失败:', e);
+          console.error('加载二级活动所属一级活动失败:', e);
         }
       }
 

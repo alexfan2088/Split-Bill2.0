@@ -31,9 +31,9 @@ function sortLatestFirst(records, field) {
 
 async function getParentActivityDetail(db, parentId, userName) {
   const parentDoc = await db.collection('activities').doc(parentId).get();
-  if (!parentDoc.data || !parentDoc.data.isParent) return { success: false, error: '父活动不存在' };
+  if (!parentDoc.data || !parentDoc.data.isParent) return { success: false, error: '一级活动不存在' };
   if (parentDoc.data.creator !== userName) {
-    return { success: false, error: '仅父活动创建者可查看父活动' };
+    return { success: false, error: '仅一级活动创建者可查看一级活动' };
   }
 
   const children = await fetchAll(db, 'activities', { parentId });
@@ -53,7 +53,7 @@ async function getParentActivityDetail(db, parentId, userName) {
 
 async function refreshParentMembers(db, parentId) {
   const parentDoc = await db.collection('activities').doc(parentId).get();
-  if (!parentDoc.data || !parentDoc.data.isParent) return { success: false, error: '父活动不存在' };
+  if (!parentDoc.data || !parentDoc.data.isParent) return { success: false, error: '一级活动不存在' };
   const children = await fetchAll(db, 'activities', { parentId });
   const names = [];
   children.forEach(child => (child.memberNames || (child.members || []).map(getName)).forEach(name => {

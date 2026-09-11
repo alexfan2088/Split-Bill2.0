@@ -5,7 +5,7 @@
         <view class="activity-title-row">
           <view class="activity-title {{isCreator ? 'creator-title' : ''}}">
             {{activity.name}}
-            <text wx:if="{{isParent}}" class="parent-tag">（父活动）</text>
+            <text wx:if="{{isParent}}" class="parent-tag">（一级活动）</text>
             <text wx:if="{{isPrepaid}}" class="prepaid-tag">（预存）</text>
           </view>
           <button class="btn-edit-activity {{isCreator ? '' : 'disabled'}}" size="mini" bindtap="editActivity" disabled="{{!isCreator}}">编辑</button>

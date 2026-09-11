@@ -302,7 +302,7 @@ exports.main = async (event) => {
       const auth = await verifyUser(userName, passwordHash, password);
       if (!auth.ok) return { success: false, error: auth.error };
       const parentDoc = await db.collection('activities').doc(parentId).get();
-      if (!parentDoc.data || parentDoc.data.creator !== userName) return { success: false, error: '只有父活动创建者可以更新成员' };
+      if (!parentDoc.data || parentDoc.data.creator !== userName) return { success: false, error: '只有一级活动创建者可以更新成员' };
       return await refreshParentMembers(db, parentId);
     }
 

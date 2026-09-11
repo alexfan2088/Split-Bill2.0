@@ -318,7 +318,7 @@ Page({
     } catch (e) {
       console.error('加载活动数据失败:', e);
       const message = (e && e.message) || '';
-      if (message.includes('仅父活动创建者可查看父活动')) {
+      if (message.includes('仅一级活动创建者可查看一级活动')) {
         wx.showToast({
           title: '仅可查看参与的二级活动',
           icon: 'none'
@@ -348,7 +348,7 @@ Page({
         data: { action: 'getParentActivityDetail', activityId, userName, passwordHash }
       });
       const detail = (res && res.result) || {};
-      if (!detail.success) throw new Error(detail.error || '加载父活动失败');
+      if (!detail.success) throw new Error(detail.error || '加载一级活动失败');
 
       const activity = detail.activity;
       const children = detail.children || [];
@@ -402,7 +402,7 @@ Page({
       const displayActivity = { ...activity, members: memberNames.map(name => ({ name })) };
       this.setData({
         activity: displayActivity,
-        activityMeta: `父活动 | 参与成员：${memberNames.join('、') || '暂无成员'}`,
+        activityMeta: `一级活动 | 参与成员：${memberNames.join('、') || '暂无成员'}`,
         currentTab: 'summary',
         isParent: true,
         isCreator: activity.creator === userName,
@@ -419,14 +419,14 @@ Page({
         dateRange: '',
         childActivities,
         childCount: childActivities.length,
-        // 保留导出所需的完整子活动数据，生成父活动 PDF 时逐个复用子活动的原有导出内容。
+        // 保留导出所需的完整子活动数据，生成一级活动导出文件时逐个复用子活动内容。
         pdfChildDetails: children,
         totalRecharge: '0.00',
         totalConsume: this.formatAmount(total),
         remaining: '0.00'
       });
     } catch (e) {
-      console.error('加载父活动失败:', e);
+      console.error('加载一级活动失败:', e);
       wx.showToast({ title: e.message || '加载失败', icon: 'none' });
     } finally {
       wx.hideLoading();
@@ -908,7 +908,7 @@ Page({
   
   addBill() {
     if (this.data.isParent) {
-      wx.showToast({ title: '父活动不能直接记账，请新增二级活动', icon: 'none' });
+      wx.showToast({ title: '一级活动不能直接记账，请新增二级活动', icon: 'none' });
       return;
     }
     wx.navigateTo({
@@ -1580,10 +1580,18 @@ Page({
         const values = Array.isArray(row) ? row : [row];
         const isTitle = this.isXlsxSectionTitle(values);
         const isHeader = this.isXlsxTableHeader(values);
-        const lineCapacity = isTitle ? maxColumns * 6 : 6;
-        const lineCount = values.reduce((max, value) => Math.max(max, this.estimateXlsxLineCount(value, lineCapacity)), 1);
+        const isTwoColumnRow = values.length === 2;
+        const lineCount = values.reduce((max, value, columnIndex) => {
+          const lineCapacity = isTitle
+            ? maxColumns * 6
+            : (isTwoColumnRow && columnIndex === 1 ? 4 * 6 : 6);
+          return Math.max(max, this.estimateXlsxLineCount(value, lineCapacity));
+        }, 1);
         if (isTitle) {
           merges.push({ s: { r: rowIndex, c: 0 }, e: { r: rowIndex, c: maxColumns - 1 } });
+        }
+        if (isTwoColumnRow && maxColumns >= 5) {
+          merges.push({ s: { r: rowIndex, c: 1 }, e: { r: rowIndex, c: 4 } });
         }
         if (values.some(value => value !== undefined && value !== null && value !== '')) {
           rowSettings[rowIndex] = { hpt: (isTitle ? 24 : 18) * lineCount };
@@ -1609,7 +1617,7 @@ Page({
     sheet['!rows'] = rowSettings;
     sheet['!cols'] = Array.from({ length: maxColumns }, () => ({ wch: 6 }));
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, sheet, this.data.isParent ? '父活动导出' : '活动导出');
+    XLSX.utils.book_append_sheet(workbook, sheet, this.data.isParent ? '一级活动导出' : '活动导出');
     return XLSX.write(workbook, { bookType: 'xlsx', type: 'array', compression: true });
   },
 

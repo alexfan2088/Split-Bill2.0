@@ -71,9 +71,9 @@ async function getActivityDetail(db, activityId, userName) {
     return { success: false, error: '无权查看该活动' };
   }
 
-  // 父活动仅供创建者查看，避免二级活动成员通过父活动入口获取其他子活动信息。
+  // 一级活动仅供创建者查看，避免二级活动成员通过一级活动入口获取其他子活动信息。
   if (activity.isParent && activity.creator !== userName) {
-    return { success: false, error: '仅父活动创建者可查看父活动' };
+    return { success: false, error: '仅一级活动创建者可查看一级活动' };
   }
 
   const [bills, recharges] = await Promise.all([

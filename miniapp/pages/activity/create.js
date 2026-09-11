@@ -180,7 +180,7 @@ Page({
       const parentName = (res.data && res.data.name) || fallbackName;
       this.setData({ parentName });
     } catch (e) {
-      console.error('加载父活动名称失败:', e);
+      console.error('加载一级活动名称失败:', e);
       if (fallbackName) this.setData({ parentName: fallbackName });
     }
   },
@@ -660,7 +660,7 @@ Page({
       data: { action: 'refreshParentMembers', parentId, userName, passwordHash }
     });
     const result = (res && res.result) || {};
-    if (!result.success) throw new Error(result.error || '更新父活动成员失败');
+    if (!result.success) throw new Error(result.error || '更新一级活动成员失败');
   },
 
 
@@ -689,7 +689,7 @@ Page({
     
     
     const isParent = this.data.isParent === true;
-    // 父活动不单独维护参与者，仅保留创建者用于访问控制；详情页会实时汇总子活动成员。
+    // 一级活动不单独维护参与者，仅保留创建者用于访问控制；详情页会实时汇总子活动成员。
     let memberNames = (this.data.memberNames || []).slice();
     
     if (!isParent && memberNames.length === 0) {

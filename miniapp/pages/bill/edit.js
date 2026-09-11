@@ -180,7 +180,7 @@ Page({
         activity = actRes.data;
       }
       if (activity && activity.isParent) {
-        wx.showToast({ title: '父活动不能直接记账，请进入二级活动', icon: 'none' });
+        wx.showToast({ title: '一级活动不能直接记账，请进入二级活动', icon: 'none' });
         setTimeout(() => wx.navigateBack(), 1200);
         return;
       }

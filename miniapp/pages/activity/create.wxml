@@ -8,10 +8,10 @@
 
     <view wx:if="{{!parentId}}" class="form-item">
       <view class="switch-item">
-        <text class="switch-label">父活动</text>
+        <text class="switch-label">一级活动</text>
         <switch checked="{{isParent}}" bindchange="toggleParent" />
       </view>
-      <view class="hint">父活动不能直接记账，参与人员和结算由二级活动自动汇总。</view>
+      <view class="hint">一级活动不能直接记账，参与人员和结算由二级活动自动汇总。</view>
     </view>
 
     <view wx:if="{{parentId}}" class="parent-notice">当前创建的是「{{parentName}}」下的二级活动</view>
@@ -19,7 +19,7 @@
     <view wx:if="{{!isParent}}" class="form-item">
       <text class="label">家庭支出</text>
       <input class="input" type="digit" placeholder="留空则自动等于账单总支出" value="{{familyExpenseInput}}" bindinput="onFamilyExpenseInput" />
-      <view class="hint">用于记录本家庭实际承担的支出；二级活动填写后，父活动总支出将按此金额计算。</view>
+      <view class="hint">用于记录本家庭实际承担的支出；二级活动填写后，一级活动总支出将按此金额计算。</view>
     </view>
     
 

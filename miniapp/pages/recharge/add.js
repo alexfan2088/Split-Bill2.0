@@ -106,7 +106,7 @@ Page({
       const actRes = await dbCloud.collection('activities').doc(activityId).get();
       const activity = actRes.data;
       if (activity && activity.isParent) {
-        wx.showToast({ title: '父活动不能添加充值', icon: 'none' });
+        wx.showToast({ title: '一级活动不能添加充值', icon: 'none' });
         setTimeout(() => wx.navigateBack(), 1200);
         return;
       }
