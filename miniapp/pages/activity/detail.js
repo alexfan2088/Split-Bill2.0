@@ -1532,6 +1532,15 @@ Page({
     return Array.isArray(row) && ['项目', '成员', '日期', '序号'].includes(row[0]);
   },
 
+  estimateXlsxLineCount(value, columnWidth) {
+    return String(value === undefined || value === null ? '' : value)
+      .split(/\r?\n/)
+      .reduce((total, line) => {
+        const displayWidth = Array.from(line).reduce((width, char) => width + (char.charCodeAt(0) > 0x7f ? 1 : 0.5), 0);
+        return total + Math.max(1, Math.ceil(displayWidth / columnWidth));
+      }, 0) || 1;
+  },
+
   async buildXlsxFileData(rows, updateProgress) {
     const sourceRows = rows || [];
     const total = Math.max(sourceRows.length, 1);
@@ -1571,9 +1580,13 @@ Page({
         const values = Array.isArray(row) ? row : [row];
         const isTitle = this.isXlsxSectionTitle(values);
         const isHeader = this.isXlsxTableHeader(values);
+        const lineCapacity = isTitle ? maxColumns * 6 : 6;
+        const lineCount = values.reduce((max, value) => Math.max(max, this.estimateXlsxLineCount(value, lineCapacity)), 1);
         if (isTitle) {
           merges.push({ s: { r: rowIndex, c: 0 }, e: { r: rowIndex, c: maxColumns - 1 } });
-          rowSettings[rowIndex] = { hpt: 24 };
+        }
+        if (values.some(value => value !== undefined && value !== null && value !== '')) {
+          rowSettings[rowIndex] = { hpt: (isTitle ? 24 : 18) * lineCount };
         }
         values.forEach((value, columnIndex) => {
           if (value === undefined || value === null || value === '') return;
@@ -1594,7 +1607,7 @@ Page({
     sheet['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(0, sourceRows.length - 1), c: maxColumns - 1 } });
     sheet['!merges'] = merges;
     sheet['!rows'] = rowSettings;
-    sheet['!cols'] = Array.from({ length: maxColumns }, () => ({ wch: 9 }));
+    sheet['!cols'] = Array.from({ length: maxColumns }, () => ({ wch: 6 }));
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, sheet, this.data.isParent ? '父活动导出' : '活动导出');
     return XLSX.write(workbook, { bookType: 'xlsx', type: 'array', compression: true });
