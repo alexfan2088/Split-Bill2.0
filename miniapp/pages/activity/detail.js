@@ -1384,8 +1384,31 @@ Page({
     return total / totalWeight;
   },
 
+  getBillExportTime(bill) {
+    const value = bill && (bill.time || bill.createdAt || bill.updatedAt);
+    if (!value) return Number.MAX_SAFE_INTEGER;
+    const timestamp = value.getTime ? value.getTime() : new Date(value).getTime();
+    return Number.isNaN(timestamp) ? Number.MAX_SAFE_INTEGER : timestamp;
+  },
+
+  sortBillsForExport(bills) {
+    return (bills || [])
+      .map((bill, index) => ({ bill, index }))
+      .sort((left, right) => {
+        const leftTitle = String(left.bill && left.bill.title || '').trim();
+        const rightTitle = String(right.bill && right.bill.title || '').trim();
+        const titleOrder = leftTitle.localeCompare(rightTitle);
+        if (titleOrder !== 0) return titleOrder;
+        const timeOrder = this.getBillExportTime(left.bill) - this.getBillExportTime(right.bill);
+        return timeOrder || left.index - right.index;
+      })
+      .map(item => item.bill);
+  },
+
   buildCsvActivitySection(activity, bills, recharges) {
-    const sourceBills = bills || [];
+    // 导出时按名称归类；同名账单再按发生时间从早到晚排列。
+    // 复制并排序，绝不改变页面正在显示的原始账单顺序。
+    const sourceBills = this.sortBillsForExport(bills);
     const sourceRecharges = recharges || [];
     const billTotal = sourceBills.reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
     const dateRange = this.getCsvDateRange(activity, sourceBills) || '至今';
@@ -1536,7 +1559,13 @@ Page({
     return String(value === undefined || value === null ? '' : value)
       .split(/\r?\n/)
       .reduce((total, line) => {
-        const displayWidth = Array.from(line).reduce((width, char) => width + (char.charCodeAt(0) > 0x7f ? 1 : 0.5), 0);
+        // Excel 的列宽以半角字符为基准：中文和全角字符约占两个字符宽度。
+        // 按此估算行数，给真机的 XLSX 查看器预先写入足够的行高。
+        const displayWidth = Array.from(line).reduce((width, char) => {
+          const code = char.charCodeAt(0);
+          const isWide = code > 0xff || (code >= 0x2e80 && code <= 0x9fff);
+          return width + (isWide ? 2 : 1);
+        }, 0);
         return total + Math.max(1, Math.ceil(displayWidth / columnWidth));
       }, 0) || 1;
   },
@@ -1583,8 +1612,8 @@ Page({
         const isTwoColumnRow = values.length === 2;
         const lineCount = values.reduce((max, value, columnIndex) => {
           const lineCapacity = isTitle
-            ? maxColumns * 6
-            : (isTwoColumnRow && columnIndex === 1 ? 4 * 6 : 6);
+            ? 7 + Math.max(0, maxColumns - 1) * 6
+            : (isTwoColumnRow && columnIndex === 1 ? 4 * 6 : (columnIndex === 0 ? 7 : 6));
           return Math.max(max, this.estimateXlsxLineCount(value, lineCapacity));
         }, 1);
         if (isTitle) {
@@ -1615,7 +1644,8 @@ Page({
     sheet['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(0, sourceRows.length - 1), c: maxColumns - 1 } });
     sheet['!merges'] = merges;
     sheet['!rows'] = rowSettings;
-    sheet['!cols'] = Array.from({ length: maxColumns }, () => ({ wch: 6 }));
+    // A 列略宽，便于显示日期、项目名称等首列内容；其余列维持 6 个字符宽度。
+    sheet['!cols'] = Array.from({ length: maxColumns }, (_, index) => ({ wch: index === 0 ? 7 : 6 }));
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, sheet, this.data.isParent ? '一级活动导出' : '活动导出');
     return XLSX.write(workbook, { bookType: 'xlsx', type: 'array', compression: true });
