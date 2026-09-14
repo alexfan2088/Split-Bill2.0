@@ -1552,7 +1552,13 @@ Page({
   },
 
   isXlsxTableHeader(row) {
-    return Array.isArray(row) && ['项目', '成员', '日期', '序号'].includes(row[0]);
+    if (!Array.isArray(row)) return false;
+    // “成员”既可能是活动信息的一项，也可能是结算表表头。
+    // 仅匹配完整的表头结构，避免将活动及二级活动的成员信息误设为蓝色加粗。
+    return (row[0] === '项目' && row[1] === '内容') ||
+      (row[0] === '成员' && row[1] === '实付' && row[2] === '应付' && row[3] === '余额') ||
+      (row[0] === '日期' && (row[1] === '名称' || row[1] === '充值人')) ||
+      (row[0] === '序号' && row[1] === '二级活动名称');
   },
 
   estimateXlsxLineCount(value, columnWidth) {
