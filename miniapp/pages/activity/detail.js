@@ -1,7 +1,7 @@
 // pages/activity/detail.js
 const db = require('../../utils/db.js');
 const settlement = require('../../utils/settlement.js');
-const XLSX = require('../../miniprogram_npm/xlsx-js-style/index.js');
+const xlsxExport = require('../../utils/xlsxExport.js');
 const app = getApp();
 
 Page({
@@ -1579,6 +1579,18 @@ Page({
   async buildXlsxFileData(rows, updateProgress) {
     const sourceRows = rows || [];
     const total = Math.max(sourceRows.length, 1);
+    const progressChunkSize = Math.max(10, Math.ceil(total / 12));
+    for (let start = 0; start < sourceRows.length; start += progressChunkSize) {
+      const completed = Math.min(start + progressChunkSize, total);
+      updateProgress(Math.min(80, 8 + Math.floor(completed / total * 72)));
+      await new Promise(resolve => setTimeout(resolve, 45));
+    }
+    // 轻量导出器会直接写入标准 XLSX（包含样式、合并、网格线和行高）。
+    // 后续旧实现保留在此版本中仅作迁移对照，实际不会执行。
+    updateProgress(88);
+    return xlsxExport.build(sourceRows, this.data.isParent ? '一级活动导出' : '活动导出');
+
+    /* 旧版 xlsx-js-style 实现（已移除依赖，保留迁移对照）
     const maxColumns = Math.max(1, ...sourceRows.map(row => Array.isArray(row) ? row.length : 0));
     const chunkSize = Math.max(10, Math.ceil(total / 12));
     const sheet = {};
@@ -1682,6 +1694,7 @@ Page({
       console.warn('隐藏XLSX网格线失败，仍将导出文件:', error);
       return fileData;
     }
+  }, */
   },
 
   async saveXlsxFile(data, fileName) {
@@ -1708,8 +1721,7 @@ Page({
     showProgress('正在生成XLSX...', 5);
     try {
       const rows = this.data.isParent ? this.buildParentCsvRows() : this.buildActivityCsvRows();
-      let fileData = await this.buildXlsxFileData(rows, progress => showProgress('正在生成XLSX...', progress));
-      fileData = this.disableXlsxGridlines(fileData);
+      const fileData = await this.buildXlsxFileData(rows, progress => showProgress('正在生成XLSX...', progress));
       showProgress('正在保存XLSX...', 92);
       const filePath = await this.saveXlsxFile(fileData, fileName);
       this.setLastPdfDownloadAt(Date.now());

@@ -1,8 +1,5 @@
 {
   "name": "split-bill-miniapp",
   "private": true,
-  "version": "1.0.0",
-  "dependencies": {
-    "xlsx-js-style": "1.2.0"
-  }
+  "version": "1.0.0"
 }
