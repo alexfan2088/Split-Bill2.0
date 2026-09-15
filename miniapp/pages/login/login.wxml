@@ -40,7 +40,9 @@
 
       <view wx:if="{{(isRegisterMode || isSecuritySetup || (isRecoveryMode && recoveryQuestion))}}" class="form-item">
         <text class="label">密保问题：</text>
-        <input wx:if="{{!isRecoveryMode}}" class="input" type="text" placeholder="例如：我的出生地是？" value="{{securityQuestion}}" bindinput="onSecurityQuestionInput" maxlength="60" />
+        <picker wx:if="{{!isRecoveryMode}}" mode="selector" range="{{securityQuestionOptions}}" value="{{securityQuestionIndex}}" bindchange="onSecurityQuestionChange">
+          <view class="input security-question-picker {{securityQuestion ? '' : 'placeholder'}}">{{securityQuestion || '请选择密保问题'}}</view>
+        </picker>
         <text wx:else class="security-question">{{recoveryQuestion}}</text>
       </view>
 

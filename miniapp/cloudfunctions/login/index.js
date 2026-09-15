@@ -6,6 +6,7 @@ cloud.init({
 });
 
 const db = cloud.database();
+const SECURITY_QUESTION_OPTIONS = ['你出生的城市', '你宠物的名字', '你的初恋的名字'];
 
 // 密码哈希函数（与Web版本保持一致）
 function hashPassword(password) {
@@ -70,7 +71,7 @@ function hashSecurityAnswer(answer) {
 function validateSecurityInfo(question, answer) {
   const safeQuestion = String(question || '').trim();
   const safeAnswer = String(answer || '').trim();
-  if (safeQuestion.length < 2 || safeQuestion.length > 60) return '密保问题长度应为2至60个字符';
+  if (!SECURITY_QUESTION_OPTIONS.includes(safeQuestion)) return '请选择密保问题';
   if (safeAnswer.length < 2 || safeAnswer.length > 60) return '密保答案长度应为2至60个字符';
   return '';
 }

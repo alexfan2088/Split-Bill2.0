@@ -22,6 +22,8 @@ Page({
     suggestedUserNames: [],
     hasAgreed: false,
     policyVersion: '2026-08-10',
+    securityQuestionOptions: ['你出生的城市', '你宠物的名字', '你的初恋的名字'],
+    securityQuestionIndex: -1,
     securityQuestion: '',
     securityAnswer: '',
     isSecuritySetup: false,
@@ -122,6 +124,8 @@ Page({
       userNameAvailable: null,
       userNameCheckText: '',
       suggestedUserNames: [],
+      securityQuestionIndex: -1,
+      securityQuestion: '',
       isSecuritySetup: false,
       isRecoveryMode: false
     });
@@ -150,6 +154,8 @@ Page({
       userNameAvailable: null,
       userNameCheckText: '',
       suggestedUserNames: [],
+      securityQuestionIndex: -1,
+      securityQuestion: '',
       isSecuritySetup: false,
       isRecoveryMode: false
     });
@@ -298,8 +304,13 @@ Page({
     this.setData({ confirmPassword: e.detail.value });
   },
 
-  onSecurityQuestionInput(e) {
-    this.setData({ securityQuestion: e.detail.value });
+  onSecurityQuestionChange(e) {
+    const index = Number(e.detail.value);
+    const options = this.data.securityQuestionOptions || [];
+    this.setData({
+      securityQuestionIndex: Number.isInteger(index) && options[index] ? index : -1,
+      securityQuestion: Number.isInteger(index) && options[index] ? options[index] : ''
+    });
   },
 
   onSecurityAnswerInput(e) {
@@ -419,6 +430,7 @@ Page({
           this.setData({
             isSecuritySetup: true,
             isRecoveryMode: false,
+            securityQuestionIndex: -1,
             securityQuestion: '',
             securityAnswer: '',
             statusText: '请先完善密保信息，之后可用于找回密码',

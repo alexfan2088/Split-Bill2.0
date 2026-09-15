@@ -55,6 +55,9 @@
   border-color: #007bff;
 }
 
+.security-question-picker { box-sizing: border-box; min-height: 76rpx; line-height: 40rpx; color: #333; }
+.security-question-picker.placeholder { color: #999; }
+
 .username-check {
   margin-top: 14rpx;
 }
