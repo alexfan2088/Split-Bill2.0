@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Build and send the daily AI news email via the logged-in Gmail web UI."""
+"""Build and send the daily AI news email with Gmail API, SMTP, or Mail."""
 
 from __future__ import annotations
 
 import argparse
+import base64
 import datetime as dt
 import email.utils
 import html
@@ -44,6 +45,7 @@ PDF_OUT_DIR = OUT_DIR / "pdf"
 STATE_PATH = DATA_DIR / "sent_urls.json"
 GLOSSARY_STATE_PATH = DATA_DIR / "glossary_state.json"
 SMTP_CONFIG_PATH = DATA_DIR / "smtp.json"
+GMAIL_API_CREDENTIALS_PATH = DATA_DIR / "gmail_api_credentials.json"
 ITEM_LIMIT = 3
 MAX_IMAGES_PER_ARTICLE = 3
 RECIPIENTS = [
@@ -54,6 +56,9 @@ RECIPIENTS = [
 TEST_RECIPIENTS = ["alexfan2088@gmail.com"]
 SUBJECT = "AI 每天观察"
 SMTP_KEYCHAIN_SERVICE = "ai-daily-smtp-password"
+GMAIL_API_TOKEN_KEYCHAIN_SERVICE = "ai-daily-gmail-api-token"
+GMAIL_API_ACCOUNT = "alexfan2088@gmail.com"
+GMAIL_API_SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
 GOOGLE_TRANSLATE_API_RATE_LIMITED = False
 
 FEEDS = [
@@ -1241,6 +1246,65 @@ def read_keychain_password(service: str, account: str) -> str:
     return result.stdout.strip()
 
 
+def write_keychain_secret(service: str, account: str, secret: str) -> None:
+    """Store OAuth data in the user's login keychain, never in the repository."""
+    result = subprocess.run(
+        ["security", "add-generic-password", "-U", "-s", service, "-a", account, "-w", secret],
+        text=True,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or "无法写入 macOS 钥匙串")
+
+
+def gmail_api_credentials_path() -> Path:
+    configured = os.environ.get("AI_DAILY_GMAIL_API_CREDENTIALS", "").strip()
+    return Path(configured).expanduser() if configured else GMAIL_API_CREDENTIALS_PATH
+
+
+def gmail_api_is_configured() -> bool:
+    return bool(
+        gmail_api_credentials_path().exists()
+        and read_keychain_password(GMAIL_API_TOKEN_KEYCHAIN_SERVICE, GMAIL_API_ACCOUNT)
+    )
+
+
+def get_gmail_api_service(interactive: bool = False):
+    """Return an authorized Gmail API client, refreshing its token when needed."""
+    try:
+        from google.auth.transport.requests import Request
+        from google.oauth2.credentials import Credentials
+        from google_auth_oauthlib.flow import InstalledAppFlow
+        from googleapiclient.discovery import build
+    except ImportError as exc:
+        raise RuntimeError(
+            "缺少 Gmail API 依赖。请运行："
+            "tools/ai_daily/.venv/bin/python -m pip install -r tools/ai_daily/requirements.txt"
+        ) from exc
+
+    token_json = read_keychain_password(GMAIL_API_TOKEN_KEYCHAIN_SERVICE, GMAIL_API_ACCOUNT)
+    credentials = Credentials.from_authorized_user_info(json.loads(token_json), GMAIL_API_SCOPES) if token_json else None
+    if credentials and credentials.expired and credentials.refresh_token:
+        credentials.refresh(Request())
+        write_keychain_secret(GMAIL_API_TOKEN_KEYCHAIN_SERVICE, GMAIL_API_ACCOUNT, credentials.to_json())
+    if not credentials or not credentials.valid:
+        credential_path = gmail_api_credentials_path()
+        if not interactive:
+            raise RuntimeError(
+                "Gmail API 尚未授权。请先下载桌面应用 OAuth 凭据到 "
+                f"{credential_path}，然后运行 --authorize-gmail-api。"
+            )
+        if not credential_path.exists():
+            raise RuntimeError(
+                "未找到 Gmail API OAuth 凭据文件："
+                f"{credential_path}。请从 Google Cloud 下载桌面应用 credentials.json 后放到该位置。"
+            )
+        flow = InstalledAppFlow.from_client_secrets_file(str(credential_path), GMAIL_API_SCOPES)
+        credentials = flow.run_local_server(port=0, open_browser=True)
+        write_keychain_secret(GMAIL_API_TOKEN_KEYCHAIN_SERVICE, GMAIL_API_ACCOUNT, credentials.to_json())
+    return build("gmail", "v1", credentials=credentials, cache_discovery=False)
+
+
 def load_smtp_config() -> dict:
     config = {
         "host": os.environ.get("AI_DAILY_SMTP_HOST", "smtp.gmail.com"),
@@ -1436,6 +1500,37 @@ def send_via_smtp(body_path: Path, recipients: list[str], styles: list[dict] | N
         raise RuntimeError("Some SMTP sends failed: " + " | ".join(failures))
 
 
+def build_email_message(body: str, recipient: str, styles: list[dict] | None, pdf_paths: list[Path] | None) -> EmailMessage:
+    message = EmailMessage()
+    message["From"] = GMAIL_API_ACCOUNT
+    message["To"] = recipient
+    message["Subject"] = SUBJECT
+    message.set_content(body)
+    message.add_alternative(body_to_html(body, styles), subtype="html")
+    for pdf_path in pdf_paths or []:
+        message.add_attachment(pdf_path.read_bytes(), maintype="application", subtype="pdf", filename=pdf_path.name)
+    return message
+
+
+def send_via_gmail_api(body_path: Path, recipients: list[str], styles: list[dict] | None = None, pdf_paths: list[Path] | None = None) -> None:
+    """Send MIME email and PDF attachments through HTTPS Gmail API."""
+    service = get_gmail_api_service()
+    body = body_path.read_text("utf-8")
+    failures = []
+    for recipient in recipients:
+        log(f"Sending Gmail API message to {recipient}")
+        try:
+            message = build_email_message(body, recipient, styles, pdf_paths)
+            raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
+            response = service.users().messages().send(userId="me", body={"raw": raw}).execute()
+            log(f"Gmail API message sent to {recipient}; id={response.get('id', 'unknown')}")
+        except Exception as exc:
+            failures.append(f"{recipient}: {exc}")
+            log(f"Gmail API send failed for {recipient}: {exc}")
+    if failures:
+        raise RuntimeError("Some Gmail API sends failed: " + " | ".join(failures))
+
+
 def send_one_via_gmail(body_path: Path, recipient: str) -> None:
     url = compose_gmail_url(recipient)
     body_posix = str(body_path)
@@ -1501,7 +1596,9 @@ def write_body(body: str) -> Path:
 def main() -> int:
     caffeinate_guard = start_caffeinate_guard()
     parser = argparse.ArgumentParser()
-    parser.add_argument("--send", action="store_true", help="Send the generated email. Defaults to SMTP when configured.")
+    parser.add_argument("--send", action="store_true", help="Send the generated email. Defaults to Gmail API when authorized.")
+    parser.add_argument("--gmail-api", action="store_true", help="Send through Gmail API over HTTPS.")
+    parser.add_argument("--authorize-gmail-api", action="store_true", help="Open browser once to authorize Gmail API sending.")
     parser.add_argument("--smtp", action="store_true", help="Send through SMTP.")
     parser.add_argument("--gmail-web", action="store_true", help="Send through Gmail web UI.")
     parser.add_argument("--mail", action="store_true", help="Send through macOS Mail instead of Gmail web UI.")
@@ -1510,6 +1607,11 @@ def main() -> int:
     args = parser.parse_args()
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    if args.authorize_gmail_api:
+        get_gmail_api_service(interactive=True)
+        log("Gmail API authorization completed")
+        print("Gmail API authorization completed")
+        return 0
     today = dt.datetime.now().strftime("%Y-%m-%d")
     if args.send and not args.test and load_state().get("last_success_date") == today:
         log(f"AI 日报已于 {today} 成功发送；跳过本次重复触发")
@@ -1535,6 +1637,9 @@ def main() -> int:
             raise RuntimeError("PDF 附件仅支持 SMTP 发送；请移除 --mail 并配置 SMTP。")
         elif args.gmail_web:
             raise RuntimeError("PDF 附件仅支持 SMTP 发送；请移除 --gmail-web 并配置 SMTP。")
+        elif args.gmail_api or gmail_api_is_configured():
+            log(f"Sending through Gmail API to {', '.join(recipients)}")
+            send_via_gmail_api(body_path, recipients, styles, pdf_paths)
         elif args.smtp or smtp_is_configured():
             log(f"Sending through SMTP to {', '.join(recipients)}")
             send_via_smtp(body_path, recipients, styles, pdf_paths)
