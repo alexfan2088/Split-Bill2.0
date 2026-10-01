@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and send the daily AI news email with Gmail API, SMTP, or Mail."""
+"""Build and send the weekly AI news email with Gmail API, SMTP, or Mail."""
 
 from __future__ import annotations
 
@@ -46,7 +46,9 @@ STATE_PATH = DATA_DIR / "sent_urls.json"
 GLOSSARY_STATE_PATH = DATA_DIR / "glossary_state.json"
 SMTP_CONFIG_PATH = DATA_DIR / "smtp.json"
 GMAIL_API_CREDENTIALS_PATH = DATA_DIR / "gmail_api_credentials.json"
-ITEM_LIMIT = 3
+GLOBAL_ITEM_LIMIT = 3
+DOMESTIC_ITEM_LIMIT = 4
+ITEM_LIMIT = GLOBAL_ITEM_LIMIT + DOMESTIC_ITEM_LIMIT
 MAX_IMAGES_PER_ARTICLE = 3
 RECIPIENTS = [
     "hruicn@gmail.com",
@@ -54,7 +56,7 @@ RECIPIENTS = [
     "alexfan2088@gmail.com",
 ]
 TEST_RECIPIENTS = ["alexfan2088@gmail.com"]
-SUBJECT = "AI 每天观察"
+SUBJECT = "AI 每周观察"
 SMTP_KEYCHAIN_SERVICE = "ai-daily-smtp-password"
 GMAIL_API_TOKEN_KEYCHAIN_SERVICE = "ai-daily-gmail-api-token"
 GMAIL_API_ACCOUNT = "alexfan2088@gmail.com"
@@ -80,6 +82,13 @@ NEWS_SEARCHES = [
     "China AI Qwen Doubao Yuanbao GLM DeepSeek Kimi",
     "Figure AI Tesla Optimus Unitree humanoid robot NVIDIA robotics",
     "AI agents enterprise model funding valuation robotics",
+]
+
+DOMESTIC_NEWS_SEARCHES = [
+    "中国 人工智能 大模型 最新进展",
+    "通义千问 豆包 DeepSeek 大模型",
+    "智谱 Kimi 腾讯元宝 AI",
+    "中国 具身智能 人形机器人 AI",
 ]
 
 COMPANY_KEYWORDS = [
@@ -472,6 +481,10 @@ def translate_to_chinese(text: str) -> str:
                     break
             if translated:
                 break
+        # 公共翻译接口已明确限流时，后续网页和第三方接口通常也会长时间等待。
+        # 周报应优先准时发送，调用方会改用中文主题/正文提示，而不是让整期任务阻塞。
+        if GOOGLE_TRANSLATE_API_RATE_LIMITED and not translated:
+            raise RuntimeError("Google 翻译服务当前限流")
         if not translated:
             try:
                 candidate = translate_via_google_web(chunk)
@@ -559,7 +572,7 @@ def parse_feed(content: bytes, source_url: str) -> list[dict]:
 
 
 def fetch_hn_ai() -> list[dict]:
-    since = int((dt.datetime.now(dt.UTC) - dt.timedelta(days=3)).timestamp())
+    since = int((dt.datetime.now(dt.UTC) - dt.timedelta(days=7)).timestamp())
     query = urllib.parse.urlencode(
         {
             "query": "AI OR OpenAI OR Anthropic OR Gemini OR robot OR robotics",
@@ -590,15 +603,19 @@ def fetch_hn_ai() -> list[dict]:
     return items
 
 
-def google_news_rss_url(query: str) -> str:
+def google_news_rss_url(query: str, days: int = 7, language: str = "en-US", country: str = "US", ceid: str = "US:en") -> str:
     return "https://news.google.com/rss/search?" + urllib.parse.urlencode(
         {
-            "q": f"{query} when:3d",
-            "hl": "en-US",
-            "gl": "US",
-            "ceid": "US:en",
+            "q": f"{query} when:{days}d",
+            "hl": language,
+            "gl": country,
+            "ceid": ceid,
         }
     )
+
+
+def google_news_cn_rss_url(query: str) -> str:
+    return google_news_rss_url(query, days=7, language="zh-CN", country="CN", ceid="CN:zh-Hans")
 
 
 def score_item(item: dict) -> int:
@@ -687,12 +704,21 @@ def collect_items() -> list[dict]:
             collected.extend(parse_feed(fetch_url(feed), feed))
         except Exception as exc:
             log(f"News search failed: {query}: {exc}")
+    for query in DOMESTIC_NEWS_SEARCHES:
+        feed = google_news_cn_rss_url(query)
+        try:
+            domestic_items = parse_feed(fetch_url(feed), feed)
+            for item in domestic_items:
+                item["region"] = "domestic"
+            collected.extend(domestic_items)
+        except Exception as exc:
+            log(f"Domestic news search failed: {query}: {exc}")
     collected.extend(fetch_hn_ai())
 
     seen = set()
     seen_titles = set()
     unique = []
-    cutoff = dt.datetime.now(dt.UTC) - dt.timedelta(days=3)
+    cutoff = dt.datetime.now(dt.UTC) - dt.timedelta(days=7)
     for item in collected:
         url = item["url"].split("#", 1)[0]
         if url in seen:
@@ -745,16 +771,27 @@ def select_items(items: list[dict]) -> list[dict]:
     state = load_state()
     sent = set(state.get("sent_urls", []))
     fresh = [item for item in items if item["url"] not in sent]
-    selected = fresh[:ITEM_LIMIT]
-    if len(selected) < ITEM_LIMIT:
-        for item in items:
-            if item not in selected:
-                selected.append(item)
-            if len(selected) == ITEM_LIMIT:
-                break
-    ensure_robotics(items, selected)
-    ensure_china_ai(items, selected)
-    return selected[:ITEM_LIMIT]
+
+    def choose(pool: list[dict], limit: int) -> list[dict]:
+        chosen = pool[:limit]
+        if len(chosen) < limit:
+            for item in items:
+                if item in pool and item not in chosen:
+                    chosen.append(item)
+                if len(chosen) == limit:
+                    break
+        return chosen[:limit]
+
+    domestic_fresh = [item for item in fresh if item.get("region") == "domestic" and has_chinese(f"{item['title']} {item.get('summary', '')}")]
+    domestic_all = [item for item in items if item.get("region") == "domestic" and has_chinese(f"{item['title']} {item.get('summary', '')}")]
+    domestic = choose(domestic_fresh or domestic_all, DOMESTIC_ITEM_LIMIT)
+
+    global_fresh = [item for item in fresh if item.get("region") != "domestic"]
+    global_all = [item for item in items if item.get("region") != "domestic"]
+    global_items = choose(global_fresh or global_all, GLOBAL_ITEM_LIMIT)
+    ensure_robotics(global_all, global_items)
+    ensure_china_ai(global_all, global_items)
+    return global_items + domestic
 
 
 def get_article_extraction(item: dict) -> dict:
@@ -776,7 +813,7 @@ def get_article_extraction(item: dict) -> dict:
     return extraction
 
 
-def prefer_full_article_items(selected: list[dict], candidates: list[dict]) -> list[dict]:
+def prefer_full_article_items(selected: list[dict], candidates: list[dict], limit: int) -> list[dict]:
     full_articles: list[dict] = []
     seen: set[str] = set()
     for item in selected + candidates:
@@ -791,15 +828,15 @@ def prefer_full_article_items(selected: list[dict], candidates: list[dict]) -> l
             continue
         if extraction.get("kind") == "article":
             full_articles.append(item)
-            if len(full_articles) == ITEM_LIMIT:
+            if len(full_articles) == limit:
                 return full_articles
 
     for item in selected:
         if item not in full_articles:
             full_articles.append(item)
-        if len(full_articles) == ITEM_LIMIT:
+        if len(full_articles) == limit:
             break
-    return full_articles[:ITEM_LIMIT]
+    return full_articles[:limit]
 
 
 def stars(item: dict, index: int) -> str:
@@ -892,7 +929,15 @@ def get_translated_blocks(item: dict) -> list[dict]:
     translated: list[dict] = []
     for block in get_article_extraction(item).get("blocks", []):
         if block["type"] == "text":
-            translated.append({"type": "text", "text": translate_to_chinese(block["text"])})
+            text = clean_text(block["text"])
+            if has_chinese(text):
+                translated.append({"type": "text", "text": text})
+            else:
+                try:
+                    translated.append({"type": "text", "text": translate_to_chinese(text)})
+                except Exception as exc:
+                    log(f"International article translation unavailable; keeping weekly report running: {exc}")
+                    translated.append({"type": "text", "text": "英文原文翻译服务暂不可用；请通过本文链接查看原文。"})
         else:
             translated.append(block.copy())
     item["_translated_blocks"] = translated
@@ -902,7 +947,14 @@ def get_translated_blocks(item: dict) -> list[dict]:
 def get_translated_title(item: dict) -> str:
     if "_translated_title" not in item:
         title = clean_text(item.get("title", ""))
-        item["_translated_title"] = translate_to_chinese(title)
+        if has_chinese(title):
+            item["_translated_title"] = title
+        else:
+            try:
+                item["_translated_title"] = translate_to_chinese(title)
+            except Exception as exc:
+                log(f"International title translation unavailable; using Chinese topic fallback: {exc}")
+                item["_translated_title"] = f"{infer_topic(item)[0]}：国际进展"
     return item["_translated_title"]
 
 
@@ -925,7 +977,7 @@ def build_article_pdf(item: dict, index: int, report_date: str) -> Path:
     font_name = register_pdf_font()
     PDF_OUT_DIR.mkdir(parents=True, exist_ok=True)
     title = get_translated_title(item)
-    path = PDF_OUT_DIR / f"ai_daily_{report_date}_{index}_{safe_filename(title)}.pdf"
+    path = PDF_OUT_DIR / f"ai_weekly_{report_date}_{index}_{safe_filename(title)}.pdf"
     document = SimpleDocTemplate(
         str(path), pagesize=A4, leftMargin=17 * mm, rightMargin=17 * mm, topMargin=16 * mm, bottomMargin=16 * mm,
         title=title,
@@ -937,7 +989,7 @@ def build_article_pdf(item: dict, index: int, report_date: str) -> Path:
     caption = ParagraphStyle("AIDailyCaption", parent=meta, fontSize=8.5, leading=12, alignment=TA_CENTER, spaceAfter=10)
     story = [
         Paragraph(html.escape(title), heading),
-        Paragraph("中文直译原文（图片按原文出现位置排版）", meta),
+        Paragraph("中文原文（图片按原文出现位置排版）" if item.get("region") == "domestic" else "中文直译原文（图片按原文出现位置排版）", meta),
         Paragraph(f'原文链接：<link href="{html.escape(item["url"])}">{html.escape(item["url"])}</link>', meta),
         Spacer(1, 5),
     ]
@@ -967,7 +1019,15 @@ def build_article_pdf(item: dict, index: int, report_date: str) -> Path:
             image._restrictSize(document.width, 125 * mm)
             story.extend([Spacer(1, 3), image])
             if block.get("caption"):
-                story.append(Paragraph(html.escape(translate_to_chinese(block["caption"])), caption))
+                caption_text = clean_text(block["caption"])
+                if has_chinese(caption_text):
+                    story.append(Paragraph(html.escape(caption_text), caption))
+                else:
+                    try:
+                        story.append(Paragraph(html.escape(translate_to_chinese(caption_text)), caption))
+                    except Exception as exc:
+                        log(f"Image caption translation unavailable: {exc}")
+                        story.append(Spacer(1, 8))
             else:
                 story.append(Spacer(1, 8))
         except Exception as exc:
@@ -983,7 +1043,7 @@ def build_article_pdfs(items: list[dict]) -> list[Path]:
     for index, item in enumerate(items, 1):
         path = build_article_pdf(item, index, report_date)
         paths.append(path)
-        log(f"Wrote translated article PDF: {path}")
+        log(f"Wrote weekly article PDF: {path}")
     return paths
 
 
@@ -1139,7 +1199,7 @@ def select_glossary_terms(items: list[dict]) -> list[dict]:
 
 
 def glossary_lines(items: list[dict]) -> list[str]:
-    lines = ["", "每日名词："]
+    lines = ["", "每周名词："]
     for index, entry in enumerate(select_glossary_terms(items), 1):
         lines.extend(["", f"{index}. {entry['term']}"])
         lines.extend(entry["body"])
@@ -1165,11 +1225,17 @@ def build_body_with_styles(items: list[dict], glossary_terms: list[dict] | None 
     styles: list[dict] = []
     glossary_terms = glossary_terms or select_glossary_terms(items)
 
-    append_segments(parts, styles, [("AI 每天观察", None)])
+    append_segments(parts, styles, [("AI 每周观察", None)])
     append_segments(parts, styles, [("", None)])
-    append_segments(parts, styles, [(f"本期采集窗口：最近 3 天，生成日期：{today}。", None)])
+    append_segments(parts, styles, [(f"本期采集窗口：最近 7 天，生成日期：{today}。", None)])
 
     for idx, item in enumerate(items, 1):
+        if idx == 1:
+            append_segments(parts, styles, [("", None)])
+            append_segments(parts, styles, [("全球 AI 观察（3篇）", RED_BOLD)])
+        elif idx == GLOBAL_ITEM_LIMIT + 1:
+            append_segments(parts, styles, [("", None)])
+            append_segments(parts, styles, [("国内 AI 最新进展（4篇）", RED_BOLD)])
         append_segments(parts, styles, [("", None)])
         append_segments(parts, styles, [(f"{idx}. {get_translated_title(item)}", None)])
         append_segments(parts, styles, [("链接：", BLUE_BOLD)])
@@ -1178,24 +1244,25 @@ def build_body_with_styles(items: list[dict], glossary_terms: list[dict] | None 
         append_segments(parts, styles, [("总结解读：", BLUE_BOLD)])
         append_segments(parts, styles, [(chinese_summary(item, idx - 1), None)])
         append_segments(parts, styles, [("", None)])
-        append_segments(parts, styles, [("中文直译：", BLUE_BOLD)])
+        source_label = "中文原文：" if item.get("region") == "domestic" else "中文直译："
+        append_segments(parts, styles, [(source_label, BLUE_BOLD)])
         append_segments(parts, styles, [(f"请见附件 PDF《{idx}_{safe_filename(get_translated_title(item))}》；其中图片已按原文出现位置与相关段落排版。", None)])
 
     append_segments(parts, styles, [("", None)])
-    append_segments(parts, styles, [("今日结论：", None)])
+    append_segments(parts, styles, [("本周结论：", None)])
     append_segments(
         parts,
         styles,
         [
             (
-                "AI 竞争正在从单点模型能力转向系统能力。每天真正值得盯的，不只是某个模型又刷新了哪个榜单，而是谁能把 AI 稳定地接入真实业务、真实设备和真实收入。后续如果某条新闻连续多天发酵，本邮件会优先追踪新增信息，避免重复搬运同一条旧链接。",
+                "AI 竞争正在从单点模型能力转向系统能力。本周真正值得盯的，不只是某个模型又刷新了哪个榜单，而是谁能把 AI 稳定地接入真实业务、真实设备和真实收入。后续如果某条新闻连续发酵，本邮件会优先追踪新增信息，避免重复搬运同一条旧链接。",
                 None,
             )
         ],
     )
 
     append_segments(parts, styles, [("", None)])
-    append_segments(parts, styles, [("每日名词：", RED_BOLD)])
+    append_segments(parts, styles, [("每周名词：", RED_BOLD)])
     for index, entry in enumerate(glossary_terms, 1):
         append_segments(parts, styles, [("", None)])
         append_segments(parts, styles, [(f"{index}. {entry['term']}", BLACK_BOLD)])
@@ -1588,7 +1655,7 @@ def send_via_gmail(body_path: Path, recipients: list[str]) -> None:
 
 def write_body(body: str) -> Path:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    path = OUT_DIR / f"ai_daily_{dt.datetime.now().strftime('%Y-%m-%d')}.txt"
+    path = OUT_DIR / f"ai_weekly_{dt.datetime.now().strftime('%Y-%m-%d')}.txt"
     path.write_text(body, "utf-8")
     return path
 
@@ -1614,14 +1681,16 @@ def main() -> int:
         return 0
     today = dt.datetime.now().strftime("%Y-%m-%d")
     if args.send and not args.test and load_state().get("last_success_date") == today:
-        log(f"AI 日报已于 {today} 成功发送；跳过本次重复触发")
+        log(f"AI 周报已于 {today} 成功发送；跳过本次重复触发")
         return 0
     log("Collecting AI news")
     items = collect_items()
     if len(items) < ITEM_LIMIT:
         log(f"Only collected {len(items)} eligible items; continuing with available items")
     selected = select_items(items)
-    selected = prefer_full_article_items(selected, items)
+    global_selected = prefer_full_article_items(selected[:GLOBAL_ITEM_LIMIT], [item for item in items if item.get("region") != "domestic"], GLOBAL_ITEM_LIMIT)
+    domestic_selected = prefer_full_article_items(selected[GLOBAL_ITEM_LIMIT:], [item for item in items if item.get("region") == "domestic"], DOMESTIC_ITEM_LIMIT)
+    selected = global_selected + domestic_selected
     if not selected:
         raise RuntimeError("No AI news items collected.")
 
