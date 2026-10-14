@@ -50,11 +50,7 @@ GLOBAL_ITEM_LIMIT = 3
 DOMESTIC_ITEM_LIMIT = 4
 ITEM_LIMIT = GLOBAL_ITEM_LIMIT + DOMESTIC_ITEM_LIMIT
 MAX_IMAGES_PER_ARTICLE = 3
-RECIPIENTS = [
-    "hruicn@gmail.com",
-    "rocket.tang@163.com",
-    "alexfan2088@gmail.com",
-]
+RECIPIENTS = ["alexfan2088@gmail.com"]
 TEST_RECIPIENTS = ["alexfan2088@gmail.com"]
 SUBJECT = "AI 每周观察"
 SMTP_KEYCHAIN_SERVICE = "ai-daily-smtp-password"
